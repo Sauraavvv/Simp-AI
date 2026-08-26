@@ -18,7 +18,7 @@ export const AUTH_CHANGED_EVENT = "auth:changed";
 /** Fired whenever credit counts update in real-time. */
 export const CREDITS_CHANGED_EVENT = "credits:changed";
 
-const SESSION_STORAGE_KEY = "nexus_user_session";
+const SESSION_STORAGE_KEY = "lumi_user_session";
 
 function getStoredUser(): CurrentUser | null {
   if (typeof window === "undefined") return null;
@@ -110,7 +110,7 @@ export async function logout(): Promise<void> {
   loadedOnce = true;
   setStoredUser(null);
   if (typeof window !== "undefined") {
-    localStorage.removeItem("nexus_cached_conversations");
+    localStorage.removeItem("lumi_cached_conversations");
   }
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }

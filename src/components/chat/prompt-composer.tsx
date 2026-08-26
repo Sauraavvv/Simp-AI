@@ -274,7 +274,7 @@ export function PromptComposer({
       )}
 
       <p className="mt-2 text-center text-[11.5px] text-muted-foreground/70">
-        Nexus AI can make mistakes. Verify important information.
+        Lumi AI can make mistakes. Verify important information.
       </p>
     </div>
   );

@@ -86,7 +86,7 @@ export function GeneratedImageCard({
               </button>
               <a
                 href={image.url}
-                download={`nexus-${image.seed ?? "image"}.png`}
+                download={`lumi-${image.seed ?? "image"}.png`}
                 title="Download image"
                 aria-label="Download image"
                 className="grid size-7.5 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-md transition-all hover:bg-primary hover:scale-105 active:scale-95 shadow-xs"
@@ -120,7 +120,7 @@ export function GeneratedImageCard({
               <p className="line-clamp-2 text-xs font-medium text-white/90">{image.prompt}</p>
               <a
                 href={image.url}
-                download={`nexus-${image.seed ?? "image"}.png`}
+                download={`lumi-${image.seed ?? "image"}.png`}
                 className="flex shrink-0 items-center gap-1.5 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-md hover:bg-white/30 transition-colors"
               >
                 <Download className="size-3.5" />

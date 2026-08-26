@@ -25,7 +25,7 @@ export function GeneratedVideoCard({
   const [zoomed, setZoomed] = useState(false);
 
   const ratio = video.aspect === "portrait" ? 9 / 16 : 16 / 9;
-  const fileName = `nexus-${video.duration ?? 5}s.mp4`;
+  const fileName = `lumi-${video.duration ?? 5}s.mp4`;
 
   if (broken) {
     return (

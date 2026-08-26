@@ -161,7 +161,7 @@ function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
       {/* Modern Badge */}
       <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary shadow-2xs backdrop-blur-md mb-4 animate-in fade-in duration-500">
         <Sparkles className="size-3.5 text-primary animate-pulse" />
-        <span>Nexus AI • Next-Gen Workspace</span>
+        <span>Lumi AI • Next-Gen Workspace</span>
       </div>
 
       {/* Main Title */}

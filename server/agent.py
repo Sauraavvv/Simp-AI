@@ -146,7 +146,7 @@ def stream_chat(
     model = provider.model
     # One trace per turn; a no-op unless LANGSMITH_TRACING is on. See tracing.py.
     turn = tracing.span(
-        "Nexus turn",
+        "Lumi turn",
         "chain",
         {"messages": history},
         conversation_id=conversation_id,

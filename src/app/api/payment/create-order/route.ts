@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       currency: rzpData.currency,
       keyId: KEY_ID,
       userEmail: email,
-      productName: "Nexus AI Pro Unlimited Plan",
+      productName: "Lumi AI Pro Unlimited Plan",
     });
   } catch (err) {
     console.error("[Payment] Create Order Exception:", err);

@@ -15,12 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexus AI - Next-Gen Workspace",
+  title: "Lumi AI - Next-Gen Workspace",
   description: "AI data assistant with tool calling, powered by Groq",
   icons: {
-    icon: "/nexus-logo.png",
-    shortcut: "/nexus-logo.png",
-    apple: "/nexus-logo.png",
+    icon: "/lumi-logo.png",
+    shortcut: "/lumi-logo.png",
+    apple: "/lumi-logo.png",
   },
 };
 
@@ -32,8 +32,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`light ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <link rel="icon" type="image/png" href="/nexus-logo.png" />
-        <link rel="apple-touch-icon" href="/nexus-logo.png" />
+        <link rel="icon" type="image/png" href="/lumi-logo.png" />
+        <link rel="apple-touch-icon" href="/lumi-logo.png" />
         <script
           id="theme-init"
           dangerouslySetInnerHTML={{

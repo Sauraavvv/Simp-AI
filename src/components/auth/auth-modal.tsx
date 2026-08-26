@@ -134,7 +134,7 @@ export function AuthModal({
       if (tab === "register") {
         const res = await registerUser(email, password);
         if (res.success) {
-          showToast("Account created successfully! Welcome to Nexus AI.", "success");
+          showToast("Account created successfully! Welcome to Lumi AI.", "success");
           setEmail("");
           setPassword("");
           setConfirmPassword("");

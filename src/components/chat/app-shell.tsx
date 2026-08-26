@@ -46,7 +46,7 @@ export function AppShell({
             <Button variant="ghost" size="icon" onClick={() => setMobileNav(true)} aria-label="Open navigation">
               <Menu className="size-4" />
             </Button>
-            <span className="font-display text-sm font-semibold">Nexus AI</span>
+            <span className="font-display text-sm font-semibold">Lumi AI</span>
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">

@@ -54,7 +54,7 @@ value is not.
 
 # The name the assistant gives for itself. Change it here and every answer
 # below follows -- there is no second copy in the base prompt.
-ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Nexus").strip() or "Nexus"
+ASSISTANT_NAME = os.environ.get("ASSISTANT_NAME", "Lumi").strip() or "Lumi"
 
 IDENTITY_PROMPT = """
 ## Identity

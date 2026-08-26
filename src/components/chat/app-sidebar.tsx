@@ -63,7 +63,7 @@ function cleanTitle(rawTitle: string): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
-const CACHED_CONVERSATIONS_KEY = "nexus_cached_conversations";
+const CACHED_CONVERSATIONS_KEY = "lumi_cached_conversations";
 
 function getStoredConversations(): Conversation[] {
   if (typeof window === "undefined") return [];
@@ -203,7 +203,7 @@ export function AppSidebar({
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="font-display font-bold text-sm tracking-tight text-sidebar-foreground truncate">
-                  Nexus AI
+                  Lumi AI
                 </span>
                 <span className="text-[10px] text-muted-foreground/70 font-mono tracking-wider uppercase">
                   Environment

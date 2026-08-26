@@ -43,3 +43,4 @@ next-env.d.ts
 
 # Claude Code local instructions
 CLAUDE.md
+.claude/
