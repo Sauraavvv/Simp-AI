@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/chat/app-shell";
 import { AIMessage, UserMessage } from "@/components/chat/chat-messages";
 import { LiveToolCard } from "@/components/chat/live-tool-card";
+import { SourcesPanel, type Source } from "@/components/chat/sources-panel";
 import { AlertCircle, ArrowDown, ArrowUp, BarChart3, Code2, FileText, Globe, Lightbulb, Sparkles, UserPlus } from "lucide-react";
 import { MessageMarkdown } from "@/components/chat/message-markdown";
 import { OptionPicker, parseChoice } from "@/components/chat/option-picker";
@@ -15,7 +16,7 @@ import { useSession } from "@/lib/auth";
 import { useChat } from "@/lib/useChat";
 import { useSpeech } from "@/lib/useVoice";
 import { buildMessage, splitMessage } from "@/lib/attachments";
-import { SELECT_CONVERSATION, type Attachment, type Message, type ToolInfo } from "@/lib/types";
+import { SELECT_CONVERSATION, type Attachment, type Message } from "@/lib/types";
 
 function formatUserError(rawError: string): string {
   if (!rawError) return "Something went wrong. Please try again.";
@@ -56,11 +57,13 @@ function Turn({
   isStreaming,
   isLast,
   onPick,
+  onOpenSources,
 }: {
   message: Message;
   isStreaming: boolean;
   isLast: boolean;
   onPick: (value: string) => void;
+  onOpenSources: () => void;
 }) {
   if (message.role === "user") {
     // Attached file bodies are in the stored message for the model's benefit;
@@ -91,7 +94,9 @@ function Turn({
 
   return (
     <AIMessage>
-      {message.tools?.map((tool, i) => <LiveToolCard key={i} tool={tool} />)}
+      {message.tools?.map((tool, i) => (
+        <LiveToolCard key={i} tool={tool} onOpenSources={onOpenSources} />
+      ))}
 
       {message.error ? (
         <div className="rounded-2xl border border-destructive/20 bg-surface px-4 py-3.5 text-[13.5px] text-foreground space-y-1 shadow-xs animate-in fade-in duration-200">
@@ -161,14 +166,14 @@ function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
       {/* Modern Badge */}
       <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary shadow-2xs backdrop-blur-md mb-4 animate-in fade-in duration-500">
         <Sparkles className="size-3.5 text-primary animate-pulse" />
-        <span>Lumi AI • Next-Gen Workspace</span>
+        <span>SIMP AI - Simply Intelligent</span>
       </div>
 
       {/* Main Title */}
       <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-foreground">
         How can I help you <span className="bg-gradient-to-r from-primary via-primary/90 to-amber-500 bg-clip-text text-transparent">today?</span>
       </h2>
-      <p className="mt-2.5 text-xs sm:text-sm text-muted-foreground max-w-xs sm:max-w-md leading-relaxed font-normal">
+      <p className="mt-2.5 text-[11px] sm:text-sm text-muted-foreground whitespace-nowrap leading-relaxed font-normal">
         Ask anything, search real-time web insights, write clean code, or analyze complex data.
       </p>
 
@@ -296,7 +301,43 @@ function Chat() {
     setInput("");
   }
 
+  // Every web_search result across the thread, newest first, deduped by URL --
+  // shown in the side panel instead of being buried in the tool log.
+  const sources = useMemo<Source[]>(() => {
+    const seen = new Set<string>();
+    const list: Source[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const tool of messages[i].tools ?? []) {
+        if (tool.name !== "web_search" || !tool.result) continue;
+        try {
+          const parsed = JSON.parse(tool.result) as {
+            results?: { title: string; url: string; snippet?: string }[];
+          };
+          for (const r of parsed.results ?? []) {
+            if (!r.url || seen.has(r.url)) continue;
+            seen.add(r.url);
+            list.push({ title: r.title, url: r.url, snippet: r.snippet });
+          }
+        } catch {
+          // Malformed tool result -- skip it rather than crash the panel.
+        }
+      }
+    }
+    return list;
+  }, [messages]);
+
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+
   return (
+    <AppShell
+      rightPanel={
+        sources.length > 0
+          ? (onClose) => <SourcesPanel sources={sources} onClose={onClose} />
+          : undefined
+      }
+      rightPanelOpen={sourcesOpen}
+      onRightPanelClose={() => setSourcesOpen(false)}
+    >
     <div className="relative flex flex-col flex-1 min-h-0">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto flex flex-col">
         {isOpening && messages.length === 0 ? (
@@ -312,6 +353,7 @@ function Chat() {
                 isStreaming={isLoading && i === messages.length - 1}
                 isLast={i === messages.length - 1}
                 onPick={(value) => handleSend(value)}
+                onOpenSources={() => setSourcesOpen(true)}
               />
             ))}
           </div>
@@ -335,7 +377,7 @@ function Chat() {
         </div>
       )}
 
-      <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 backdrop-blur-xs w-full">
+      <div className="sticky bottom-0 z-20 shrink-0 bg-elevated/95 backdrop-blur-xs w-full">
         {isGuestLimitReached ? (
           <div className="mx-auto w-full max-w-3xl px-3 sm:px-4 py-3 sm:py-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-primary/40 bg-sidebar/95 p-4 sm:p-5 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -376,15 +418,14 @@ function Chat() {
         initialTab="register"
       />
     </div>
+    </AppShell>
   );
 }
 
 export default function ChatPage() {
   return (
-    <AppShell>
-      <Suspense fallback={<div className="min-h-0 flex-1" />}>
-        <Chat />
-      </Suspense>
-    </AppShell>
+    <Suspense fallback={<div className="min-h-0 flex-1" />}>
+      <Chat />
+    </Suspense>
   );
 }

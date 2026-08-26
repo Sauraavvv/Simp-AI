@@ -3,7 +3,7 @@ import { ArrowLeft, Compass, Hexagon, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export const metadata = {
-  title: "404 — Page Not Found | Lumi AI",
+  title: "404 — Page Not Found | SIMP AI",
   description: "The page you are looking for does not exist or has been moved.",
 };
 
@@ -61,7 +61,7 @@ export default function NotFound() {
         {/* Bottom subtle status label */}
         <div className="pt-2 text-[11px] text-muted-foreground/60 flex items-center gap-2">
           <span className="size-2 rounded-full bg-success animate-pulse" />
-           Lumi AI Agent System · All Services Operational
+           SIMP AI Agent System · All Services Operational
         </div>
       </div>
     </div>

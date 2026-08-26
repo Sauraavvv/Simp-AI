@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Globe, Loader2 } from "lucide-react";
 import { GeneratedImageCard, parseGeneratedImage } from "@/components/chat/generated-image";
 import { GeneratedVideoCard, parseGeneratedVideo } from "@/components/chat/generated-video";
 import type { ToolEvent } from "@/lib/types";
@@ -60,7 +60,14 @@ function errorText(result: string): string {
  * disappears": their result IS the answer, so the picture or clip is rendered
  * here and stays with the stored turn.
  */
-export function LiveToolCard({ tool }: { tool: ToolEvent }) {
+export function LiveToolCard({
+  tool,
+  onOpenSources,
+}: {
+  tool: ToolEvent;
+  /** web_search succeeded -- opens the Sources panel instead of showing nothing. */
+  onOpenSources?: () => void;
+}) {
   const running = tool.result === undefined;
 
   if (running) {
@@ -99,6 +106,30 @@ export function LiveToolCard({ tool }: { tool: ToolEvent }) {
     return <GeneratedImageCard image={image} className="max-w-md" />;
   }
 
-  // Succeeded -- nothing to show; the answer follows.
+  if (tool.name === "web_search" && onOpenSources) {
+    const count = (() => {
+      try {
+        const parsed = JSON.parse(tool.result!) as { results?: unknown[] };
+        return parsed.results?.length ?? 0;
+      } catch {
+        return 0;
+      }
+    })();
+
+    if (count > 0) {
+      return (
+        <button
+          type="button"
+          onClick={onOpenSources}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1 text-[12px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground cursor-pointer"
+        >
+          <Globe className="size-3.5 text-primary shrink-0" />
+          {count} {count === 1 ? "source" : "sources"}
+        </button>
+      );
+    }
+  }
+
+  // Succeeded -- nothing else to show; the answer follows.
   return null;
 }

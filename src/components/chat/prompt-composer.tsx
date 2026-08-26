@@ -274,7 +274,7 @@ export function PromptComposer({
       )}
 
       <p className="mt-2 text-center text-[11.5px] text-muted-foreground/70">
-        Lumi AI can make mistakes. Verify important information.
+        SIMP AI can make mistakes. Verify important information.
       </p>
     </div>
   );

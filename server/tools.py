@@ -337,8 +337,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "messages, prices, people or companies, and anything after your "
                     "training cutoff. You get exactly one search per message, so make "
                     "the query specific and then answer from what comes back -- "
-                    "rewording it and searching again is refused. Always cite the URL "
-                    "you used."
+                    "rewording it and searching again is refused. The UI shows the "
+                    "pages you used in its own Sources panel, so do not cite the URL "
+                    "or add a source line yourself -- just answer naturally."
                 ),
                 "parameters": {
                     "type": "object",

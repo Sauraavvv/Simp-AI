@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
-  Hexagon,
   Image as ImageIcon,
   MessageSquare,
   Plus,
@@ -17,12 +16,17 @@ import {
   Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { ProfileAvatarMenu } from "@/components/auth/profile-avatar-menu";
 import { AuthModal } from "@/components/auth/auth-modal";
 import { showToast } from "@/components/ui/toast";
 import { AUTH_CHANGED_EVENT, useSession } from "@/lib/auth";
-import { CONVERSATIONS_CHANGED, SELECT_CONVERSATION, type Conversation } from "@/lib/types";
+import { useTheme } from "@/lib/theme";
+import {
+  ACTIVE_CONVERSATION_CHANGED,
+  CONVERSATIONS_CHANGED,
+  SELECT_CONVERSATION,
+  type Conversation,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Bucket a conversation by how long ago it was last touched. */
@@ -38,7 +42,6 @@ const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Older"];
 
 /** Main top navigation links in the sidebar. */
 const MAIN_SECTIONS = [
-  { href: "/", label: "Chat", icon: MessageSquare },
   { href: "/voice", label: "AI Voice Chat", icon: AudioLines },
 ] as const;
 
@@ -63,7 +66,7 @@ function cleanTitle(rawTitle: string): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
-const CACHED_CONVERSATIONS_KEY = "lumi_cached_conversations";
+const CACHED_CONVERSATIONS_KEY = "simp_cached_conversations";
 
 function getStoredConversations(): Conversation[] {
   if (typeof window === "undefined") return [];
@@ -112,6 +115,7 @@ export function AppSidebar({
   }, []);
 
   const { user, loading: sessionLoading } = useSession();
+  const { resolvedTheme } = useTheme();
   const signedIn = Boolean(user);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authTab, setAuthTab] = useState<"login" | "register">("login");
@@ -159,6 +163,18 @@ export function AppSidebar({
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChange);
   }, []);
 
+  // The chat page assigns a conversation id itself -- on the first message of a
+  // new chat, or when opened via a `?c=` link -- neither of which goes through
+  // selectThread() below. This is how the sidebar learns to highlight it.
+  useEffect(() => {
+    function onActiveChanged(e: Event) {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (id) setActiveId(id);
+    }
+    window.addEventListener(ACTIVE_CONVERSATION_CHANGED, onActiveChanged);
+    return () => window.removeEventListener(ACTIVE_CONVERSATION_CHANGED, onActiveChanged);
+  }, []);
+
   async function remove(id: string) {
     try {
       const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
@@ -183,7 +199,7 @@ export function AppSidebar({
     <aside
       className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground overflow-hidden"
     >
-      <div className="flex items-center justify-between px-3.5 py-4">
+      <div className="flex items-center justify-between px-3.5 py-3">
         {collapsed ? (
           <Button
             variant="ghost"
@@ -197,18 +213,17 @@ export function AppSidebar({
           </Button>
         ) : (
           <>
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shrink-0">
-                <Hexagon className="size-4 fill-current" />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="font-display font-bold text-sm tracking-tight text-sidebar-foreground truncate">
-                  Lumi AI
-                </span>
-                <span className="text-[10px] text-muted-foreground/70 font-mono tracking-wider uppercase">
-                  Environment
-                </span>
-              </div>
+            <div className="flex items-center gap-2 min-w-0">
+              <img
+                src={resolvedTheme === "dark" ? "/simp-icon-dark.png" : "/simp-icon-light.png"}
+                alt=""
+                className="size-9 shrink-0 rounded-lg object-cover"
+              />
+              <img
+                src={resolvedTheme === "dark" ? "/simp-logo-dark.png" : "/simp-logo.png"}
+                alt="Simp AI"
+                className="h-9 w-auto object-contain"
+              />
             </div>
             <Button
               variant="ghost"
@@ -224,214 +239,268 @@ export function AppSidebar({
         )}
       </div>
 
-      <nav className="space-y-0.5 px-3 pb-2">
-        {MAIN_SECTIONS.map((section) => {
-          const current = pathname === section.href;
-          return (
-            <Link
-              key={section.href}
-              href={section.href}
-              onClick={() => onItemClick?.()}
-              title={collapsed ? section.label : undefined}
-              aria-current={current ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
-                collapsed && "justify-center px-0",
-                current
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-                  : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-              )}
-            >
-              <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
-              {!collapsed && section.label}
-            </Link>
-          );
-        })}
+      {mounted && !sessionLoading && signedIn && collapsed && (
+        <div className="px-3 pb-2">
+          <Button
+            variant="secondary"
+            onClick={() => selectThread(null)}
+            className={cn(
+              "w-full justify-center gap-2 border px-0 text-sm cursor-pointer transition-colors",
+              activeId === null
+                ? "border-primary/40 bg-sidebar-accent text-sidebar-accent-foreground"
+                : "border-border bg-elevated/70 hover:bg-elevated",
+            )}
+            title="New Conversation"
+          >
+            <Plus className="size-4 text-primary" />
+          </Button>
+        </div>
+      )}
 
-        {/* All Tools Accordion Header */}
-        <div>
+      {collapsed && (
+        <nav className="space-y-0.5 px-3 pb-2">
+          {MAIN_SECTIONS.map((section) => {
+            const current = pathname === section.href;
+            return (
+              <Link
+                key={section.href}
+                href={section.href}
+                onClick={() => onItemClick?.()}
+                title={section.label}
+                aria-current={current ? "page" : undefined}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-md px-0 py-2 text-sm transition-colors",
+                  current
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                )}
+              >
+                <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
+              </Link>
+            );
+          })}
+
           <button
             type="button"
             onClick={() => {
-              if (collapsed) {
-                onToggle();
-                setUserToggledTools(true);
-              } else {
-                setUserToggledTools(!toolsOpen);
-              }
+              onToggle();
+              setUserToggledTools(true);
             }}
-            title={collapsed ? "All Tools" : undefined}
+            title="All Tools"
             className={cn(
-              "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors cursor-pointer select-none",
-              collapsed && "justify-center px-0",
+              "flex w-full items-center justify-center gap-2 rounded-md px-0 py-2 text-sm transition-colors cursor-pointer select-none",
               isToolsActive
                 ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
                 : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
             )}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
-              {!collapsed && <span>All Tools</span>}
-            </div>
-            {!collapsed && (
-              <ChevronDown
-                className={cn(
-                  "size-3.5 text-muted-foreground/70 transition-transform duration-300 ease-in-out shrink-0",
-                  toolsOpen && "rotate-180 text-primary",
-                )}
-              />
-            )}
+            <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
           </button>
-
-          {/* Smooth Dropdown Content */}
-          {!collapsed && (
-            <div
-              className={cn(
-                "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out pl-3.5 border-l border-sidebar-border/60 ml-4.5 my-1",
-                toolsOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 overflow-hidden pointer-events-none",
-              )}
-            >
-              <div className="overflow-hidden space-y-0.5 pt-0.5">
-                <Link
-                  href="/tools/image"
-                  onClick={() => onItemClick?.()}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-                    pathname === "/tools/image"
-                      ? "bg-sidebar-accent text-primary font-semibold"
-                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                  )}
-                >
-                  <ImageIcon className="size-3.5 shrink-0 opacity-70" />
-                  <span>Image Generator</span>
-                </Link>
-                <Link
-                  href="/tools/video"
-                  onClick={() => onItemClick?.()}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-                    pathname === "/tools/video"
-                      ? "bg-sidebar-accent text-primary font-semibold"
-                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                  )}
-                >
-                  <VideoIcon className="size-3.5 shrink-0 opacity-70" />
-                  <span>Video Generator</span>
-                </Link>
-              </div>
-            </div>
-          )}
-        </div>
-      </nav>
-
-      {mounted && !sessionLoading && signedIn && (
-        <div className="px-3 pb-3">
-          <Button
-            variant="secondary"
-            onClick={() => selectThread(null)}
-            className={cn(
-              "w-full justify-start gap-2 border border-border bg-elevated/70 text-sm hover:bg-elevated cursor-pointer",
-              collapsed && "justify-center px-0",
-            )}
-          >
-            <Plus className="size-4 text-primary" />
-            {!collapsed && "New Conversation"}
-          </Button>
-        </div>
+        </nav>
       )}
 
-      <div className="px-3 pt-1">
-        <Separator className="bg-sidebar-border" />
-      </div>
+      {!collapsed && (
+        <div className="mx-3 mt-1 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-sidebar-border bg-elevated/40">
+          {mounted && !sessionLoading && signedIn && (
+            <div className="shrink-0 border-b border-sidebar-border/60 p-2">
+              <Button
+                variant="secondary"
+                onClick={() => selectThread(null)}
+                className={cn(
+                  "w-full justify-start gap-2 border-0 text-sm cursor-pointer transition-colors",
+                  activeId === null
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold hover:bg-sidebar-accent"
+                    : "bg-sidebar hover:bg-sidebar-accent",
+                )}
+              >
+                <Plus className="size-4 text-primary" />
+                New Conversation
+              </Button>
+            </div>
+          )}
 
-      {mounted && !collapsed && !sessionLoading && !signedIn && (
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-          <div className="rounded-xl border border-border bg-surface/60 p-2.5 space-y-1">
-            <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-foreground">
-              <MessageSquare className="size-3 text-primary shrink-0" />
-              Guest Chat (Unsaved)
-            </p>
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              Temporary window.{" "}
+          <nav className="shrink-0 space-y-0.5 p-2 border-b border-sidebar-border/60">
+            {MAIN_SECTIONS.map((section) => {
+              const current = pathname === section.href;
+              return (
+                <Link
+                  key={section.href}
+                  href={section.href}
+                  onClick={() => onItemClick?.()}
+                  aria-current={current ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
+                    current
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
+                  {section.label}
+                </Link>
+              );
+            })}
+
+            {/* All Tools Accordion Header */}
+            <div>
               <button
                 type="button"
-                onClick={() => {
-                  setAuthTab("login");
-                  setAuthModalOpen(true);
-                }}
-                className="font-medium text-primary hover:text-primary/80 transition-colors no-underline cursor-pointer"
+                onClick={() => setUserToggledTools(!toolsOpen)}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors cursor-pointer select-none",
+                  isToolsActive
+                    ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                )}
               >
-                Log in / Register
-              </button>{" "}
-              to save history &amp; unlock 50 free credits.
-            </p>
-          </div>
-
-          <AuthModal
-            open={authModalOpen}
-            onClose={() => setAuthModalOpen(false)}
-            initialTab={authTab}
-          />
-        </div>
-      )}
-
-      {mounted && !collapsed && !sessionLoading && signedIn && (
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-          {conversations.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] text-muted-foreground/70">
-              No conversations yet. Ask something to start one.
-            </p>
-          ) : (
-            GROUP_ORDER.map((group) => {
-              const rows = conversations.filter((c) => groupOf(c.updated_at) === group);
-              if (!rows.length) return null;
-              return (
-                <div key={group} className="mb-4">
-                  <p className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                    {group}
-                  </p>
-                  <div className="space-y-0.5">
-                    {rows.map((c) => (
-                      <div
-                        key={c.id}
-                        className={cn(
-                          "group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                          c.id === activeId && "bg-sidebar-accent text-sidebar-accent-foreground",
-                        )}
-                      >
-                        <MessageSquare className="size-3.5 shrink-0 opacity-70" />
-                        <button
-                          onClick={() => selectThread(c.id)}
-                          className="min-w-0 flex-1 truncate text-left cursor-pointer"
-                          title={cleanTitle(c.title)}
-                        >
-                          {cleanTitle(c.title)}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            remove(c.id);
-                          }}
-                          className="opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
-                          title="Delete conversation"
-                          aria-label={`Delete ${cleanTitle(c.title)}`}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
+                  <span>All Tools</span>
                 </div>
-              );
-            })
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 text-muted-foreground/70 transition-transform duration-300 ease-in-out shrink-0",
+                    toolsOpen && "rotate-180 text-primary",
+                  )}
+                />
+              </button>
+
+              {/* Smooth Dropdown Content */}
+              <div
+                className={cn(
+                  "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out pl-3.5 border-l border-sidebar-border/60 ml-4.5 my-1",
+                  toolsOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 overflow-hidden pointer-events-none",
+                )}
+              >
+                <div className="overflow-hidden space-y-0.5 pt-0.5">
+                  <Link
+                    href="/tools/image"
+                    onClick={() => onItemClick?.()}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
+                      pathname === "/tools/image"
+                        ? "bg-sidebar-accent text-primary font-semibold"
+                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                    )}
+                  >
+                    <ImageIcon className="size-3.5 shrink-0 opacity-70" />
+                    <span>Image Generator</span>
+                  </Link>
+                  <Link
+                    href="/tools/video"
+                    onClick={() => onItemClick?.()}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
+                      pathname === "/tools/video"
+                        ? "bg-sidebar-accent text-primary font-semibold"
+                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                    )}
+                  >
+                    <VideoIcon className="size-3.5 shrink-0 opacity-70" />
+                    <span>Video Generator</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </nav>
+
+          {mounted && !sessionLoading && !signedIn && (
+            <div className="min-h-0 flex-1 overflow-y-auto p-2.5 space-y-1">
+              <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-foreground">
+                <MessageSquare className="size-3 text-primary shrink-0" />
+                Guest Chat (Unsaved)
+              </p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Temporary window.{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthTab("login");
+                    setAuthModalOpen(true);
+                  }}
+                  className="font-medium text-primary hover:text-primary/80 transition-colors no-underline cursor-pointer"
+                >
+                  Log in / Register
+                </button>{" "}
+                to save history &amp; unlock 50 free credits.
+              </p>
+
+              <AuthModal
+                open={authModalOpen}
+                onClose={() => setAuthModalOpen(false)}
+                initialTab={authTab}
+              />
+            </div>
           )}
+
+          {mounted && !sessionLoading && signedIn && (
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                Recent Chat
+              </p>
+              {conversations.length === 0 ? (
+                <p className="px-2.5 py-2 text-[12px] text-muted-foreground/70">
+                  No conversations yet. Ask something to start one.
+                </p>
+              ) : (
+                GROUP_ORDER.map((group) => {
+                  const rows = conversations.filter((c) => groupOf(c.updated_at) === group);
+                  if (!rows.length) return null;
+                  return (
+                    <div key={group} className="mb-4">
+                      <p className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                        {group}
+                      </p>
+                      <div className="space-y-0.5">
+                        {rows.map((c) => (
+                          <div
+                            key={c.id}
+                            className={cn(
+                              "group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                              c.id === activeId && "bg-sidebar-accent text-sidebar-accent-foreground",
+                            )}
+                          >
+                            <MessageSquare className="size-3.5 shrink-0 opacity-70" />
+                            <button
+                              onClick={() => selectThread(c.id)}
+                              className="min-w-0 flex-1 truncate text-left cursor-pointer"
+                              title={cleanTitle(c.title)}
+                            >
+                              {cleanTitle(c.title)}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                remove(c.id);
+                              }}
+                              className="opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+                              title="Delete conversation"
+                              aria-label={`Delete ${cleanTitle(c.title)}`}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          <div className="shrink-0 border-t border-sidebar-border/60">
+            <ProfileAvatarMenu collapsed={false} onNavigate={onItemClick ?? onToggle} />
+          </div>
         </div>
       )}
 
-      <div className="mt-auto border-t border-sidebar-border">
-        <ProfileAvatarMenu collapsed={collapsed} onNavigate={onItemClick ?? onToggle} />
-      </div>
+      {collapsed && (
+        <div className="mt-auto px-3 pb-3">
+          <ProfileAvatarMenu collapsed onNavigate={onItemClick ?? onToggle} />
+        </div>
+      )}
     </aside>
   );
 }

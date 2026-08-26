@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AUTH_CHANGED_EVENT, decrementLocalCredit, refreshCurrentUser } from "@/lib/auth";
-import { CONVERSATIONS_CHANGED, type Message } from "@/lib/types";
+import { ACTIVE_CONVERSATION_CHANGED, CONVERSATIONS_CHANGED, type Message } from "@/lib/types";
 
 type StreamEvent = {
   type: string;
@@ -147,6 +147,24 @@ export function useChat() {
         buffer = lines.pop() ?? ""; // trailing element is an incomplete line
 
         if (lines.length > 0) {
+          // Handled outside the setMessages updater below -- updater functions
+          // run during React's render phase and must stay pure, but this fires
+          // a DOM event that synchronously updates the sidebar.
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line) as StreamEvent;
+              if (event.type === "conversation" && event.id) {
+                setConversationId(event.id);
+                window.dispatchEvent(
+                  new CustomEvent(ACTIVE_CONVERSATION_CHANGED, { detail: { id: event.id } }),
+                );
+              }
+            } catch {
+              // Ignore invalid JSON lines
+            }
+          }
+
           setMessages((prev) => {
             const base = prev.length >= initialTurn.length ? prev : initialTurn;
             const lastIdx = base.length - 1;
@@ -160,9 +178,7 @@ export function useChat() {
               if (!line.trim()) continue;
               try {
                 const event = JSON.parse(line) as StreamEvent;
-                if (event.type === "conversation") {
-                  if (event.id) setConversationId(event.id);
-                } else if (event.type === "text") {
+                if (event.type === "text") {
                   updatedContent += event.value || "";
                   hasChanges = true;
                 } else if (event.type === "tool_call") {

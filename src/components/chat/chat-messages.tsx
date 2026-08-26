@@ -1,6 +1,6 @@
 "use client";
 
-import { Hexagon } from "lucide-react";
+import { useTheme } from "@/lib/theme";
 
 export function UserMessage({ children }: { children: React.ReactNode }) {
   return (
@@ -13,10 +13,15 @@ export function UserMessage({ children }: { children: React.ReactNode }) {
 }
 
 export function AIMessage({ children }: { children: React.ReactNode }) {
+  const { resolvedTheme } = useTheme();
   return (
     <div className="flex gap-0 sm:gap-3">
-      <div className="hidden sm:grid mt-0.5 size-7 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary ring-1 ring-primary/25">
-        <Hexagon className="size-3.5" />
+      <div className="hidden sm:block mt-0.5 size-7 shrink-0 overflow-hidden rounded-lg ring-1 ring-primary/25">
+        <img
+          src={resolvedTheme === "dark" ? "/simp-icon-dark.png" : "/simp-icon-light.png"}
+          alt="SIMP AI"
+          className="size-full object-cover"
+        />
       </div>
       <div className="min-w-0 flex-1 space-y-3">{children}</div>
     </div>

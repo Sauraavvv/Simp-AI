@@ -3,7 +3,7 @@
 Off by default. Set LANGSMITH_TRACING=true and LANGSMITH_API_KEY in .env.local
 and every turn shows up at smith.langchain.com as a tree:
 
-    Lumi turn (chain)
+    SIMP turn (chain)
       openai/gpt-oss-120b (llm)      one span per tool round
       web_search (tool)
 

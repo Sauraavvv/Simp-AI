@@ -1,4 +1,4 @@
-# Lumi AI
+# SIMP AI
 
 An AI data assistant: a Next.js UI talking to a **Python** agent that runs Groq
 with LLM tool calling.
@@ -51,13 +51,13 @@ Open <http://localhost:3000>. Check the agent alone at
 | Section | Request | Behaviour |
 | --- | --- | --- |
 | Secrets | API keys, passwords, tokens, env file contents | Replies exactly `I can't answer these type of questions.` and calls no tool |
-| Identity | "who are you", "are you ChatGPT", "which model are you" | Answers as Lumi, built by an independent developer; never names the model or provider |
+| Identity | "who are you", "are you ChatGPT", "which model are you" | Answers as SIMP, built by an independent developer; never names the model or provider |
 | Conduct | Rudeness, swearing, insults | Answers the question anyway, in a level tone — see below |
 | Topic *(off)* | Anything outside IT / technology | Says it only covers IT topics; calls no tool |
 
 ### Identity
 
-One answer, from one place. `ASSISTANT_NAME` (default `Lumi`) is the only copy
+One answer, from one place. `ASSISTANT_NAME` (default `SIMP`) is the only copy
 of the name — the base prompt in `agent.py` defers to this section rather than
 repeating it. The rule holds through the usual pressure: insisting, claiming to
 already know, "just between us", framing it as a test, or asking it to ignore
@@ -104,7 +104,7 @@ LANGSMITH_PROJECT=Chat-app
 Restart the agent and each turn appears as a tree:
 
 ```
-Lumi turn (chain)
+SIMP turn (chain)
 ├── openai/gpt-oss-120b (llm)   one span per tool round
 ├── web_search (tool)
 └── openai/gpt-oss-120b (llm)

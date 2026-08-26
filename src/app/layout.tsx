@@ -15,12 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lumi AI - Next-Gen Workspace",
+  title: "SIMP AI - Simply Intelligent",
   description: "AI data assistant with tool calling, powered by Groq",
   icons: {
-    icon: "/lumi-logo.png",
-    shortcut: "/lumi-logo.png",
-    apple: "/lumi-logo.png",
+    icon: "/simp-icon-dark.png",
+    shortcut: "/simp-icon-dark.png",
+    apple: "/simp-icon-dark.png",
   },
 };
 
@@ -32,8 +32,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`light ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <link rel="icon" type="image/png" href="/lumi-logo.png" />
-        <link rel="apple-touch-icon" href="/lumi-logo.png" />
+        <link rel="icon" type="image/png" href="/simp-icon-dark.png" />
+        <link rel="apple-touch-icon" href="/simp-icon-dark.png" />
         <script
           id="theme-init"
           dangerouslySetInnerHTML={{

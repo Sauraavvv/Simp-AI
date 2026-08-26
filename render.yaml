@@ -5,7 +5,7 @@
 # this repo, then fill in the secrets marked `sync: false` below.
 services:
   - type: web
-    name: lumi-agent
+    name: simp-agent
     runtime: python
     plan: free
     region: singapore      # closest to Mongo Atlas / your users -- change if yours differ.
@@ -32,6 +32,6 @@ services:
       - key: TOPIC_POLICY
         value: "off"
       - key: ASSISTANT_NAME
-        value: Lumi
+        value: SIMP
       - key: LANGSMITH_TRACING
         value: "false"

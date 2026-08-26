@@ -91,7 +91,7 @@ export function PlanActivationModal({
         key: orderData.keyId,
         amount: orderData.amount,
         currency: orderData.currency,
-        name: "Lumi AI",
+        name: "SIMP AI",
         description: "Pro Unlimited Plan - Lifetime Unlimited Chat & Tools",
         image: "/favicon.ico",
         order_id: orderData.orderId,
@@ -172,7 +172,7 @@ export function PlanActivationModal({
               ? "You have lifetime unlimited AI messages, web searches, and priority tool execution."
               : user.plan === "free"
               ? `You are currently on the Free Starter plan (${user.credits ?? 0} credits remaining). Upgrade to Pro anytime for unlimited access.`
-              : "Welcome to Lumi AI! Choose a plan below to activate your account and start interacting with your tools."}
+              : "Welcome to SIMP AI! Choose a plan below to activate your account and start interacting with your tools."}
           </p>
         </div>
 

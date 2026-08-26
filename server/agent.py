@@ -67,8 +67,10 @@ what you say about yourself is set by the Identity section below.
 Use web_search whenever the answer depends on something you do not reliably know:
 current events, public facts, documentation, libraries, APIs, error messages,
 prices, people or companies, and anything that may have changed since your training
-data. Never invent those details -- search, then report what you found and cite the
-source URL.
+data. Never invent those details -- search, then report what you found in plain
+prose. The UI already shows the pages you searched in a separate Sources panel, so
+never append a "Source:" line, a bare URL, or a citation marker like 【...】 to your
+answer -- just write the answer naturally, as if you already knew it.
 
 Always format all responses and web search results as clean, normal natural language text using Markdown (lists, headers, bold text, links). NEVER output raw JSON objects, raw tool call parameters, or code blocks containing raw JSON responses unless explicitly asked by the user to return JSON.
 
@@ -146,7 +148,7 @@ def stream_chat(
     model = provider.model
     # One trace per turn; a no-op unless LANGSMITH_TRACING is on. See tracing.py.
     turn = tracing.span(
-        "Lumi turn",
+        "SIMP turn",
         "chain",
         {"messages": history},
         conversation_id=conversation_id,

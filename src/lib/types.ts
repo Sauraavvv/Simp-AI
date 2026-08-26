@@ -135,6 +135,9 @@ export type VideoToolStatus = {
 /** Fired after a turn creates or updates a conversation, so the sidebar refetches. */
 export const CONVERSATIONS_CHANGED = "conversations:changed";
 export const SELECT_CONVERSATION = "conversations:select";
+/** Fired when the chat page's own conversation id changes -- e.g. the first
+ *  message of a new chat gets one assigned -- so the sidebar can highlight it. */
+export const ACTIVE_CONVERSATION_CHANGED = "conversations:active-changed";
 
 /** A text file the user attached, already read in the browser. */
 export type Attachment = {

@@ -57,50 +57,51 @@
 }
 
 .dark {
-  --background: #0b0d10;
-  --foreground: #e6e9ef;
+  /* Vercel's own dark theme: true black surfaces, Geist blue accent. */
+  --background: #000000;
+  --foreground: #ededed;
 
-  --surface: #131720;
-  --elevated: #1a1f2b;
+  --surface: #0a0a0a;
+  --elevated: #111111;
 
-  --card: #131720;
-  --card-foreground: #e6e9ef;
-  --popover: #1a1f2b;
-  --popover-foreground: #e6e9ef;
+  --card: #0a0a0a;
+  --card-foreground: #ededed;
+  --popover: #111111;
+  --popover-foreground: #ededed;
 
-  --primary: #7c8cff;
-  --primary-foreground: #0b0d10;
-  --secondary: #1a1f2b;
-  --secondary-foreground: #e6e9ef;
+  --primary: #0070f3;
+  --primary-foreground: #ffffff;
+  --secondary: #171717;
+  --secondary-foreground: #ededed;
 
-  --muted: #1a1f2b;
-  --muted-foreground: #8b94a7;
-  --accent: #212836;
-  --accent-foreground: #e6e9ef;
+  --muted: #171717;
+  --muted-foreground: #a1a1a1;
+  --accent: #1a1a1a;
+  --accent-foreground: #ededed;
 
-  --success: #3dd68c;
-  --warning: #f5b14c;
-  --destructive: #f2555a;
-  --destructive-foreground: #0b0d10;
+  --success: #46a758;
+  --warning: #f5a623;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
 
-  --border: #232936;
-  --border-strong: #333c4e;
-  --input: #232936;
-  --ring: #7c8cff;
+  --border: #1f1f1f;
+  --border-strong: #333333;
+  --input: #1f1f1f;
+  --ring: #0070f3;
 
-  --sidebar: #0e1116;
-  --sidebar-foreground: #e6e9ef;
-  --sidebar-accent: #1a1f2b;
+  --sidebar: #000000;
+  --sidebar-foreground: #ededed;
+  --sidebar-accent: #111111;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #1c2230;
+  --sidebar-border: #1f1f1f;
 
-  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.3);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 24px rgb(0 0 0 / 0.5);
 
-  --chart-1: #7c8cff;
-  --chart-2: #3dd68c;
-  --chart-3: #f5b14c;
-  --chart-4: #a78bfa;
-  --chart-5: #38bdf8;
+  --chart-1: #0070f3;
+  --chart-2: #46a758;
+  --chart-3: #f5a623;
+  --chart-4: #7928ca;
+  --chart-5: #50e3c2;
 }
 
 @theme inline {

@@ -38,7 +38,7 @@ import video  # noqa: E402
 from agent import stream_chat  # noqa: E402  (needs env loaded first)
 from tools import IMAGE_PATH, VIDEO_PATH, registry  # noqa: E402
 
-app = FastAPI(title="Lumi AI agent", version="1.0.0")
+app = FastAPI(title="SIMP AI agent", version="1.0.0")
 
 
 # Loading the speech models takes about five seconds each, and lazily that cost

@@ -18,7 +18,7 @@ export const AUTH_CHANGED_EVENT = "auth:changed";
 /** Fired whenever credit counts update in real-time. */
 export const CREDITS_CHANGED_EVENT = "credits:changed";
 
-const SESSION_STORAGE_KEY = "lumi_user_session";
+const SESSION_STORAGE_KEY = "simp_user_session";
 
 function getStoredUser(): CurrentUser | null {
   if (typeof window === "undefined") return null;
@@ -110,7 +110,7 @@ export async function logout(): Promise<void> {
   loadedOnce = true;
   setStoredUser(null);
   if (typeof window !== "undefined") {
-    localStorage.removeItem("lumi_cached_conversations");
+    localStorage.removeItem("simp_cached_conversations");
   }
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
@@ -122,8 +122,12 @@ export async function logout(): Promise<void> {
  * than render a signed-out state, which would otherwise flash on every load.
  */
 export function useSession(): { user: CurrentUser | null; loading: boolean } {
-  const [user, setUser] = useState<CurrentUser | null>(cached);
-  const [loading, setLoading] = useState(!loadedOnce);
+  // Always start at the SSR-matching state (null, loading). The localStorage-seeded
+  // cache is applied in the effect below, which only runs client-side after
+  // hydration -- reading it here would make the client's first render diverge
+  // from the server's and trigger a hydration mismatch.
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;

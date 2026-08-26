@@ -33,7 +33,7 @@ const FAQS = [
   },
   {
     q: "How do the 50 free chat credits work?",
-    a: "When you activate the Free Plan after logging in or registering, you receive 50 prompt credits instantly. Each message or prompt sent to Lumi AI consumes 1 credit.",
+    a: "When you activate the Free Plan after logging in or registering, you receive 50 prompt credits instantly. Each message or prompt sent to SIMP AI consumes 1 credit.",
   },
   {
     q: "What happens when I reach 0 credits or max image quota?",
@@ -123,7 +123,7 @@ export default function PlansPage() {
         key: orderData.keyId,
         amount: orderData.amount,
         currency: orderData.currency,
-        name: "Lumi AI",
+        name: "SIMP AI",
         description: "Pro Unlimited Plan - Lifetime Unlimited Access",
         image: "/favicon.ico",
         order_id: orderData.orderId,
@@ -248,7 +248,7 @@ export default function PlansPage() {
                 <span className="text-sm text-muted-foreground">/ 50 Free Credits</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Perfect for exploring Lumi AI. Get 50 free credits upon activation after login or registration.
+                Perfect for exploring SIMP AI. Get 50 free credits upon activation after login or registration.
               </p>
 
               <div className="border-t border-border pt-4 space-y-3">

@@ -1,17 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { Crown, Laptop, LogIn, LogOut, Moon, Sparkles, Sun, User, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronUp, LogIn, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { AuthModal } from "./auth-modal";
 import { PlanActivationModal } from "./plan-activation-modal";
 import { logout, useSession } from "@/lib/auth";
@@ -26,10 +18,12 @@ function formatEmail(email: string, maxLen: number = 12): string {
 
 export function ProfileAvatarMenu({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { user, loading } = useSession();
-  const { theme, setTheme, resolvedTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
   const [modalOpen, setModalOpen] = useState(false);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<"login" | "register">("login");
+  const [expanded, setExpanded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto open plan activation modal if logged in user has no active plan
   useEffect(() => {
@@ -37,6 +31,18 @@ export function ProfileAvatarMenu({ collapsed, onNavigate }: { collapsed?: boole
       setPlanModalOpen(true);
     }
   }, [user]);
+
+  // Floats above the trigger row like a popover -- close it on any click outside.
+  useEffect(() => {
+    if (!expanded) return;
+    function onPointerDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [expanded]);
 
   if (loading) {
     return (
@@ -95,114 +101,80 @@ export function ProfileAvatarMenu({ collapsed, onNavigate }: { collapsed?: boole
   const currentPlan = user.plan || "none";
   const credits = typeof user.credits === "number" ? user.credits : 0;
 
+  function closeAndNavigate() {
+    setExpanded(false);
+    onNavigate?.();
+  }
+
   return (
     <>
-      <div className="p-2 space-y-1.5">
-        {!collapsed && (
-          <div className="px-1.5 flex items-center justify-between">
-            <button
-              onClick={() => setPlanModalOpen(true)}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="View Plan Credits"
+      <div ref={containerRef} className="relative p-2">
+        <button
+          type="button"
+          onClick={() => !collapsed && setExpanded((v) => !v)}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-sidebar-accent group focus:outline-hidden cursor-pointer",
+            collapsed && "justify-center p-1",
+          )}
+          title={user.email}
+          aria-expanded={expanded}
+        >
+          <div
+            className={cn(
+              "grid size-10 shrink-0 place-items-center rounded-full text-white font-semibold text-sm shadow-xs ring-2 ring-primary/20 overflow-hidden bg-gradient-to-tr",
+              avatarGradient,
+            )}
+          >
+            {user.avatarImage ? (
+              <img src={user.avatarImage} alt="Avatar" className="size-full object-cover" />
+            ) : (
+              initial
+            )}
+          </div>
+          {!collapsed && (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-sidebar-foreground">
+                  {displayName}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {currentPlan === "paid"
+                    ? "Pro Unlimited Plan"
+                    : currentPlan === "free"
+                    ? `${credits} credits remaining`
+                    : "No Active Plan"}
+                </p>
+              </div>
+              <ChevronUp
+                className={cn(
+                  "size-4 text-muted-foreground/70 shrink-0 transition-transform duration-300 ease-in-out",
+                  expanded && "rotate-180",
+                )}
+              />
+            </>
+          )}
+        </button>
+
+        {!collapsed && expanded && (
+          <div className="absolute inset-x-2 bottom-full z-50 mb-2 space-y-0.5 rounded-xl border border-border bg-popover p-1.5 shadow-xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-150">
+            <Link
+              href="/profile"
+              onClick={closeAndNavigate}
+              className="flex items-center gap-2 rounded-md px-2.5 py-2.5 text-sm text-popover-foreground hover:bg-accent transition-colors cursor-pointer"
             >
-              <Zap className="size-3 text-primary shrink-0" />
-              {currentPlan === "paid" ? (
-                <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                  <Crown className="size-3 text-amber-400" /> Pro Unlimited
-                </span>
-              ) : currentPlan === "free" ? (
-                <span>
-                  <strong className="text-foreground">{credits}</strong> / 50 Credits
-                </span>
-              ) : (
-                <span className="text-amber-400">Activate Plan</span>
-              )}
-            </button>
+              Edit Profile
+            </Link>
             <Link
               href="/plans"
-              onClick={() => onNavigate?.()}
-              className="text-[10.5px] font-semibold text-primary hover:underline cursor-pointer py-0.5 px-1 rounded-sm hover:bg-primary/10 transition-colors"
+              onClick={closeAndNavigate}
+              className="flex items-center gap-2 rounded-md px-2.5 py-2.5 text-sm text-popover-foreground hover:bg-accent transition-colors cursor-pointer"
             >
-              Plans &rarr;
+              Pricing &amp; Plans
             </Link>
-          </div>
-        )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-xl p-1.5 text-left transition-colors hover:bg-sidebar-accent group focus:outline-hidden cursor-pointer",
-                collapsed && "justify-center p-1",
-              )}
-              title={user.email}
-            >
-              <div
-                className={cn(
-                  "grid size-8 shrink-0 place-items-center rounded-full text-white font-semibold text-xs shadow-xs ring-2 ring-primary/20 overflow-hidden bg-gradient-to-tr",
-                  avatarGradient,
-                )}
-              >
-                {user.avatarImage ? (
-                  <img src={user.avatarImage} alt="Avatar" className="size-full object-cover" />
-                ) : (
-                  initial
-                )}
-              </div>
-              {!collapsed && (
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-sidebar-foreground">
-                    {displayName}
-                  </p>
-                  <p className="truncate text-[10px] text-muted-foreground">
-                    {currentPlan === "paid"
-                      ? "Pro Unlimited Plan"
-                      : currentPlan === "free"
-                      ? `${credits} credits remaining`
-                      : "No Active Plan"}
-                  </p>
-                </div>
-              )}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52 p-1.5">
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col space-y-1">
-                <p
-                  className="text-xs font-semibold leading-none text-foreground truncate"
-                  title={user.name || user.email}
-                >
-                  {user.name || displayName}
-                </p>
-                <p
-                  className="text-[10.5px] leading-none text-muted-foreground truncate"
-                  title={user.email}
-                >
-                  {user.email}
-                </p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild className="text-xs gap-2 cursor-pointer focus:bg-elevated">
-              <Link href="/profile">
-                <User className="size-3.5 text-primary" /> Edit Profile
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild className="text-xs gap-2 cursor-pointer focus:bg-elevated">
-              <Link href="/plans">
-                <Sparkles className="size-3.5 text-amber-400" /> Pricing &amp; Plans
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <div className="flex items-center justify-between px-2.5 py-1.5 text-xs text-foreground">
-              <div className="flex items-center gap-2 font-medium">
-                {resolvedTheme === "dark" ? (
-                  <Moon className="size-3.5 text-indigo-400 shrink-0" />
-                ) : (
-                  <Sun className="size-3.5 text-amber-400 shrink-0" />
-                )}
-                <span>Appearance</span>
-              </div>
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between px-2.5 py-2.5 text-sm text-popover-foreground">
+              <span className="font-medium">Appearance</span>
               <button
                 type="button"
                 onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
@@ -225,17 +197,20 @@ export function ProfileAvatarMenu({ collapsed, onNavigate }: { collapsed?: boole
                 </span>
               </button>
             </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-xs gap-2 text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
-              onSelect={() => {
+
+            <div className="h-px bg-border" />
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(false);
                 logout();
               }}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
             >
-              <LogOut className="size-3.5" /> Logout
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              Logout
+            </button>
+          </div>
+        )}
       </div>
 
       <AuthModal

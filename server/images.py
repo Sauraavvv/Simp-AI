@@ -193,7 +193,7 @@ def _pollinations(provider: Provider, prompt: str, width: int, height: int, seed
         "model": provider.model,
         # Without this the picture comes back with a watermark strip.
         "nologo": "true",
-        "referrer": "lumi-ai",
+        "referrer": "simp-ai",
     }
     headers = {"Authorization": "Bearer {}".format(key)} if key else {}
     with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
