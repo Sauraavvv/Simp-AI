@@ -29,8 +29,6 @@ services:
         value: mantraa_ai
       - key: LLM_MODEL
         value: openai/gpt-oss-120b
-      - key: TOPIC_POLICY
-        value: "off"
       - key: ASSISTANT_NAME
         value: SIMP
       - key: LANGSMITH_TRACING

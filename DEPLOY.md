@@ -5,7 +5,7 @@ in the code: the browser only ever talks to Next.js, and Next.js is the only
 thing that talks to the Python agent (`src/lib/agent.ts`, over `AGENT_URL`).
 
 ```
-browser  ->  Vercel (Next.js: UI, /api/*, auth, credits, Razorpay)
+browser  ->  Vercel (Next.js: UI, /api/*, auth, credits)
                  |  AGENT_URL + x-agent-token
                  v
              Render (FastAPI: LLM calls, tools, conversation store, TTS)
@@ -38,7 +38,7 @@ Environment variables to set on Render:
 | `IMAGE_API_KEY` | optional -- image generation falls back to a keyless provider without it |
 | `VIDEO_API_KEY` | **required for video**, which has no keyless fallback. Unset, the Video Generator reports itself off and the agent is not offered the tool |
 | `VIDEO_MODEL` | optional -- picks both the price and the lengths on offer (see README) |
-| `LLM_MODEL`, `TOPIC_POLICY`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
+| `LLM_MODEL`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
 | `PYTHON_VERSION` | `3.11.9` |
 
 Confirm it came up: `curl https://<service>.onrender.com/health` should report
@@ -88,7 +88,6 @@ credits are wired up. Otherwise `reason` says which half is wrong --
 `misconfigured` (a variable is missing here; nothing to do in Atlas) or
 `unreachable` (section 3 below). No secrets are returned; the URI shows only as
 its host.
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID` | payments |
 
 ## 3. MongoDB Atlas
 

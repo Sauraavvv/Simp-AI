@@ -1,13 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import {
   AlertCircle,
-  Crown,
-  FileText,
-  Loader2,
-  Lock,
   Mic,
   PhoneOff,
   X,
@@ -16,9 +11,10 @@ import { AppShell } from "@/components/chat/app-shell";
 import { AIMessage, UserMessage } from "@/components/chat/chat-messages";
 import { MessageMarkdown } from "@/components/chat/message-markdown";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { useChat } from "@/lib/useChat";
-import { CALL_LANGUAGES, useVoiceCall, type CallPhase } from "@/lib/useVoiceCall";
-import { useSession } from "@/lib/auth";
+import { useVoiceCall, type CallPhase } from "@/lib/useVoiceCall";
+import type { Message } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** How each phase presents itself: ring colour, label, and the line underneath. */
@@ -162,92 +158,105 @@ function Notice({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Right-side call transcript -- mirrors SourcesPanel's layout so both side
+ *  panels in the app look and behave the same way. */
+function TranscriptPanel({
+  messages,
+  saying,
+  onClose,
+}: {
+  messages: Message[];
+  saying: string;
+  onClose?: () => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages, saying]);
+
+  return (
+    <div className="flex h-full w-full flex-col">
+      <div className="flex items-center justify-between px-4 py-3.5">
+        <p className="font-display text-sm font-semibold">
+          Transcript{messages.length > 0 && <span className="ml-1.5 text-muted-foreground">({messages.length})</span>}
+        </p>
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground"
+            onClick={onClose}
+            aria-label="Close transcript panel"
+          >
+            <X className="size-4" />
+          </Button>
+        )}
+      </div>
+      <Separator />
+
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3 space-y-6">
+        {messages.length === 0 && !saying ? (
+          <p className="px-1 text-[12px] text-muted-foreground">
+            Nothing said yet. Start the call and the conversation appears here as you talk.
+          </p>
+        ) : (
+          <>
+            {messages.map((message, i) =>
+              message.role === "user" ? (
+                <UserMessage key={i}>{message.content}</UserMessage>
+              ) : (
+                <AIMessage key={i}>
+                  {message.error ? (
+                    <p className="text-[13px] text-destructive">{message.error}</p>
+                  ) : message.content ? (
+                    <MessageMarkdown>{message.content}</MessageMarkdown>
+                  ) : (
+                    <span className="text-[13px] text-muted-foreground">…</span>
+                  )}
+                </AIMessage>
+              ),
+            )}
+
+            {/* The turn being spoken right now, before it is sent. */}
+            {saying && (
+              <div className="flex justify-end">
+                <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-primary/40 bg-elevated/50 px-4 py-2.5 text-[14.5px] italic leading-relaxed text-muted-foreground">
+                  {saying}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VoiceCall() {
-  const { user, loading: sessionLoading } = useSession();
   const chat = useChat();
   const call = useVoiceCall(chat);
   const look = PHASES[call.phase];
-  const [showTranscript, setShowTranscript] = useState(false);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
-  const transcriptRef = useRef<HTMLDivElement>(null);
+  // Opens itself the moment the AI starts talking, same as the chat page's
+  // Sources panel opens itself off a "N sources" chip -- no manual toggle here.
   useEffect(() => {
-    const el = transcriptRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [chat.messages, call.heard, call.interim]);
-
-  const isPaid = user?.plan === "paid";
-  const isPaidExpired =
-    user?.plan === "paid" &&
-    user?.planExpiresAt &&
-    new Date(user.planExpiresAt).getTime() < Date.now();
-
-  if (sessionLoading) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <Loader2 className="size-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  // Voice AI Chat is restricted for non-paid or expired users
-  if (!isPaid || isPaidExpired) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
-        <div className="max-w-md space-y-6">
-          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30 shadow-xs">
-            <Lock className="size-8 text-primary" />
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold font-display tracking-tight text-foreground">
-              Pro Feature: Voice AI Chat
-            </h2>
-            <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-              {isPaidExpired ? (
-                <span>
-                  Your monthly subscription has expired. Please top up / renew your plan for{" "}
-                  <strong>₹299/month</strong> to restore Voice AI Chat access.
-                </span>
-              ) : (
-                <span>
-                  Hands-free Voice AI Chat &amp; Speech Synthesis is an exclusive feature for Pro
-                  Monthly subscribers. Upgrade your plan for <strong>₹299/month</strong> to unlock
-                  unlimited voice calling.
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 w-full">
-            <Button
-              asChild
-              className="w-full sm:w-auto justify-center gap-2 py-2.5 px-5 text-xs font-semibold cursor-pointer shadow-md shadow-primary/25"
-            >
-              <Link href="/plans">
-                <Crown className="size-4 text-amber-300" />{" "}
-                {isPaidExpired ? "Top Up / Renew (₹299/mo)" : "Upgrade to Pro (₹299/mo)"}
-              </Link>
-            </Button>
-            <Button
-              variant="outline"
-              asChild
-              className="w-full sm:w-auto justify-center gap-2 py-2.5 px-5 text-xs font-medium cursor-pointer"
-            >
-              <Link href="/">Return to Workspace</Link>
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+    if (call.phase === "speaking") setTranscriptOpen(true);
+  }, [call.phase]);
 
   // What the recogniser has settled on this turn, plus what it is still deciding.
   const saying = [call.heard, call.interim].filter(Boolean).join(" ");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      {/* ---- the call itself ---- */}
-      <div className="flex shrink-0 flex-col items-center justify-center gap-5 px-6 py-8 lg:flex-1 lg:py-0">
+    <AppShell
+      rightPanel={(onClose) => (
+        <TranscriptPanel messages={chat.messages} saying={saying} onClose={onClose} />
+      )}
+      rightPanelOpen={transcriptOpen}
+      onRightPanelClose={() => setTranscriptOpen(false)}
+    >
+      <div className="flex shrink-0 flex-col items-center justify-center gap-5 px-6 py-8 flex-1">
         <div className="text-center">
           <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">
             AI Voice Chat
@@ -327,21 +336,6 @@ function VoiceCall() {
               <Mic className="size-4" /> Start call
             </Button>
           )}
-
-          {/* Transcript Toggle Button */}
-          <Button
-            variant="outline"
-            onClick={() => setShowTranscript((prev) => !prev)}
-            className="gap-2 rounded-full px-4 text-xs border-border bg-surface/80 hover:bg-elevated cursor-pointer transition-all shadow-2xs"
-          >
-            <FileText className="size-3.5 text-primary" />
-            <span>{showTranscript ? "Hide Transcript" : "Show Transcript"}</span>
-            {chat.messages.length > 0 && (
-              <span className="ml-0.5 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                {chat.messages.length}
-              </span>
-            )}
-          </Button>
         </div>
 
         <div className="w-full max-w-sm space-y-2">
@@ -361,84 +355,14 @@ function VoiceCall() {
           {call.speechError && <Notice>{call.speechError}</Notice>}
         </div>
       </div>
-
-      {/* ---- transcript side panel (hidden by default until user toggles) ---- */}
-      {showTranscript && (
-        <div className="flex min-h-0 flex-1 flex-col border-t border-border lg:max-w-md lg:border-l lg:border-t-0 animate-in fade-in slide-in-from-right-4 duration-300">
-          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-            <div className="flex items-center gap-2">
-              <FileText className="size-3.5 text-primary" />
-              <p className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
-                Transcript History
-              </p>
-            </div>
-            <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-              {/* Only while a call runs, so the server and first paint agree. */}
-              {call.active && (
-                <span title="Detected from the conversation — no setting to change">
-                  {CALL_LANGUAGES.find((l) => l.code === call.lang)?.label ?? call.lang}
-                </span>
-              )}
-              {call.voiceName && <span>{call.voiceName}</span>}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowTranscript(false)}
-              className="size-7 rounded-full text-muted-foreground hover:text-foreground cursor-pointer"
-              title="Hide Transcript"
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-
-          <div ref={transcriptRef} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-5">
-            {chat.messages.length === 0 && !saying ? (
-              <p className="mt-8 text-center text-[12.5px] text-muted-foreground/70">
-                Nothing said yet. Start the call and the conversation appears here as
-                you talk.
-              </p>
-            ) : (
-              <>
-                {chat.messages.map((message, i) =>
-                  message.role === "user" ? (
-                    <UserMessage key={i}>{message.content}</UserMessage>
-                  ) : (
-                    <AIMessage key={i}>
-                      {message.error ? (
-                        <p className="text-[13px] text-destructive">{message.error}</p>
-                      ) : message.content ? (
-                        <MessageMarkdown>{message.content}</MessageMarkdown>
-                      ) : (
-                        <span className="text-[13px] text-muted-foreground">…</span>
-                      )}
-                    </AIMessage>
-                  ),
-                )}
-
-                {/* The turn being spoken right now, before it is sent. */}
-                {saying && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[80%] rounded-2xl rounded-br-md border border-dashed border-primary/40 bg-elevated/50 px-4 py-2.5 text-[14.5px] italic leading-relaxed text-muted-foreground">
-                      {saying}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    </AppShell>
   );
 }
 
 export default function VoicePage() {
   return (
-    <AppShell>
-      <Suspense fallback={<div className="min-h-0 flex-1" />}>
-        <VoiceCall />
-      </Suspense>
-    </AppShell>
+    <Suspense fallback={<div className="min-h-0 flex-1" />}>
+      <VoiceCall />
+    </Suspense>
   );
 }

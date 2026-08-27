@@ -164,14 +164,6 @@ export function ProfileAvatarMenu({ collapsed, onNavigate }: { collapsed?: boole
             >
               Edit Profile
             </Link>
-            <Link
-              href="/plans"
-              onClick={closeAndNavigate}
-              className="flex items-center gap-2 rounded-md px-2.5 py-2.5 text-sm text-popover-foreground hover:bg-accent transition-colors cursor-pointer"
-            >
-              Pricing &amp; Plans
-            </Link>
-
             <div className="h-px bg-border" />
             <div className="flex items-center justify-between px-2.5 py-2.5 text-sm text-popover-foreground">
               <span className="font-medium">Appearance</span>

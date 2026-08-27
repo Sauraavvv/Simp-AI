@@ -6,7 +6,7 @@ import { AppShell } from "@/components/chat/app-shell";
 import { AIMessage, UserMessage } from "@/components/chat/chat-messages";
 import { LiveToolCard } from "@/components/chat/live-tool-card";
 import { SourcesPanel, type Source } from "@/components/chat/sources-panel";
-import { AlertCircle, ArrowDown, ArrowUp, BarChart3, Code2, FileText, Globe, Lightbulb, Sparkles, UserPlus } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, FileText, Sparkles, UserPlus } from "lucide-react";
 import { MessageMarkdown } from "@/components/chat/message-markdown";
 import { OptionPicker, parseChoice } from "@/components/chat/option-picker";
 import { PromptComposer } from "@/components/chat/prompt-composer";
@@ -153,13 +153,34 @@ function ThreadSkeleton() {
   );
 }
 
-function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
-  const quickPills = [
-    { label: "Search Web", prompt: "What are the latest tech news and developments today?", icon: Globe },
-    { label: "Explain Concept", prompt: "Explain how large language models and tool calling work", icon: Lightbulb },
-    { label: "Code Assistant", prompt: "Write a clean Python script to fetch and format API data", icon: Code2 },
-    { label: "Analyze Data", prompt: "How do I optimize web application performance?", icon: BarChart3 },
-  ];
+/** Each greeting is [normal-weight lead-in, highlighted name]. */
+const NAMED_GREETINGS: Array<(name: string) => [string, string]> = [
+  (name) => ["Hi,", `${name}!`],
+  (name) => ["Hey,", `${name}!`],
+  (name) => ["Welcome back,", `${name}!`],
+  (name) => ["Good to see you,", `${name}!`],
+  (name) => ["Hello,", `${name}!`],
+];
+
+const GUEST_GREETINGS: Array<[string, string]> = [
+  ["Hi", "there!"],
+  ["Hello", "there!"],
+  ["Welcome", "aboard!"],
+];
+
+function Welcome() {
+  const { user } = useSession();
+  // Fixed on first render so it matches the server -- the real pick happens
+  // client-side in the effect below, after hydration.
+  const [greeting, setGreeting] = useState<[string, string]>(GUEST_GREETINGS[0]);
+
+  useEffect(() => {
+    const name = user?.name?.trim() || user?.email?.split("@")[0];
+    const pool = name ? NAMED_GREETINGS.map((g) => g(name)) : GUEST_GREETINGS;
+    setGreeting(pool[Math.floor(Math.random() * pool.length)]);
+  }, [user?.name, user?.email]);
+
+  const [lead, highlight] = greeting;
 
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-4 text-center py-4 sm:py-8 my-auto animate-in fade-in zoom-in-95 duration-300">
@@ -171,25 +192,11 @@ function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
 
       {/* Main Title */}
       <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-foreground">
-        How can I help you <span className="bg-gradient-to-r from-primary via-primary/90 to-amber-500 bg-clip-text text-transparent">today?</span>
+        {lead} <span className="text-foreground">{highlight}</span>
       </h2>
       <p className="mt-2.5 text-[11px] sm:text-sm text-muted-foreground whitespace-nowrap leading-relaxed font-normal">
         Ask anything, search real-time web insights, write clean code, or analyze complex data.
       </p>
-
-      {/* Quick Action Chips (Single row on laptop/desktop) */}
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2 sm:gap-2.5 max-w-full sm:max-w-2xl lg:max-w-3xl">
-        {quickPills.map((pill) => (
-          <button
-            key={pill.label}
-            onClick={() => onPick(pill.prompt)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-surface/90 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-elevated transition-all shadow-2xs cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
-          >
-            <pill.icon className="size-3.5 text-primary" />
-            <span>{pill.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -343,7 +350,7 @@ function Chat() {
         {isOpening && messages.length === 0 ? (
           <ThreadSkeleton />
         ) : messages.length === 0 ? (
-          <Welcome onPick={handleSend} />
+          <Welcome />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-6 px-2.5 sm:px-4 py-4 sm:py-8">
             {messages.map((message, i) => (

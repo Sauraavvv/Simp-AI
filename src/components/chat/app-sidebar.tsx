@@ -199,7 +199,7 @@ export function AppSidebar({
     <aside
       className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground overflow-hidden"
     >
-      <div className="flex items-center justify-between px-3.5 py-3">
+      <div className="flex items-center justify-between px-3.5 pt-4 pb-1">
         {collapsed ? (
           <Button
             variant="ghost"
@@ -213,7 +213,7 @@ export function AppSidebar({
           </Button>
         ) : (
           <>
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-0.5 min-w-0">
               <img
                 src={resolvedTheme === "dark" ? "/simp-icon-dark.png" : "/simp-icon-light.png"}
                 alt=""

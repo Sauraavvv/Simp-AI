@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Eye,
@@ -75,6 +75,27 @@ export async function loginUser(
   }
 }
 
+type GoogleCredentialResponse = { credential: string };
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: {
+            client_id: string;
+            callback: (response: GoogleCredentialResponse) => void;
+          }) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: { theme?: string; size?: string; width?: string | number; text?: string },
+          ) => void;
+        };
+      };
+    };
+  }
+}
+
 export function AuthModal({
   open,
   onClose,
@@ -92,15 +113,74 @@ export function AuthModal({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  async function handleGoogleCredential(credential: string) {
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        await refreshCurrentUser();
+        showToast("Logged in successfully! Welcome to SIMP AI.", "success");
+        onClose();
+      } else {
+        setError(data?.error || "Google sign-in failed. Please try again.");
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // The Google script loads asynchronously (see layout.tsx), so this polls
+  // briefly rather than assuming window.google exists the moment the modal opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
+    function tryRender() {
+      if (cancelled) return;
+      const google = window.google;
+      if (!google || !googleBtnRef.current) {
+        setTimeout(tryRender, 200);
+        return;
+      }
+      google.accounts.id.initialize({
+        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+        callback: (response) => handleGoogleCredential(response.credential),
+      });
+      googleBtnRef.current.innerHTML = "";
+      // Match the surrounding inputs' width instead of a fixed pixel value,
+      // which left the button narrower than the form fields around it.
+      const width = Math.min(400, googleBtnRef.current.offsetWidth || 360);
+      google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: "outline",
+        size: "large",
+        width,
+        text: "continue_with",
+      });
+    }
+    tryRender();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
   // Password rules validation
   const hasMinLength = password.length >= 8;
   const hasUpper = /[A-Z]/.test(password);
-  const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-  const hasNumber = /[0-9]/.test(password);
-  const isPasswordStrong = hasMinLength && hasUpper && hasSpecial && hasNumber;
+  const isPasswordStrong = hasMinLength && hasUpper;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -220,6 +300,15 @@ export function AuthModal({
           </button>
         </div>
 
+        {/* Google Sign-In -- Google renders its own button into this div */}
+        <div ref={googleBtnRef} className="flex justify-center [&>div]:w-full" />
+
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <div className="h-px flex-1 bg-border" />
+          <span>OR</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
         {error && (
           <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-xs text-destructive animate-in fade-in duration-200">
             <AlertCircle className="size-4 shrink-0" />
@@ -329,20 +418,6 @@ export function AuthModal({
                     }`}
                   >
                     <span>{hasUpper ? "✓" : "✗"}</span> 1 Uppercase (A-Z)
-                  </div>
-                  <div
-                    className={`flex items-center gap-1.5 transition-colors ${
-                      hasSpecial ? "text-emerald-500 font-medium" : "text-muted-foreground"
-                    }`}
-                  >
-                    <span>{hasSpecial ? "✓" : "✗"}</span> 1 Special (!@#$...)
-                  </div>
-                  <div
-                    className={`flex items-center gap-1.5 transition-colors ${
-                      hasNumber ? "text-emerald-500 font-medium" : "text-muted-foreground"
-                    }`}
-                  >
-                    <span>{hasNumber ? "✓" : "✗"}</span> 1 Number (0-9)
                   </div>
                 </div>
               </div>

@@ -103,6 +103,13 @@ def _json(raw: str, key: str) -> Dict[str, Any]:
         return {key: raw}
 
 
+def _is_tool_schema_error(exc: Exception) -> bool:
+    """True when Groq rejected a malformed tool call the model itself generated
+    -- retrying with the same tools on offer just reproduces it."""
+    raw_lower = str(exc).lower()
+    return "tool call validation failed" in raw_lower or "did not match schema" in raw_lower
+
+
 def _format_error(exc: Exception) -> str:
     raw = str(exc)
     raw_lower = raw.lower()
@@ -115,6 +122,8 @@ def _format_error(exc: Exception) -> str:
         return "Authentication failed. Please verify your API key environment variable."
     if "500" in raw or "503" in raw or "service_unavailable" in raw_lower:
         return "The AI model service is temporarily unavailable. Please try again in a few moments."
+    if "tool call validation failed" in raw_lower or "did not match schema" in raw_lower:
+        return "The assistant tried to use a tool but built the request incorrectly. Please try asking again."
 
     try:
         import re
@@ -289,6 +298,22 @@ def stream_chat(
 
                 if completion is not None:
                     break
+
+            # Every attempt above sent `tools` and got the same malformed call
+            # rejected each time -- sending it again would not help. One last
+            # try with tools left off forces a plain-text answer instead of
+            # failing the whole turn on a schema error the user cannot act on.
+            if completion is None and last_exc and _is_tool_schema_error(last_exc):
+                try:
+                    curr_client, curr_provider = llm.client()
+                    completion = curr_client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0.6,
+                        stream=True,
+                    )
+                except Exception as exc:
+                    last_exc = exc
 
             if completion is None:
                 if last_exc:

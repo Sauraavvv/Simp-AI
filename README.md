@@ -45,15 +45,15 @@ Open <http://localhost:3000>. Check the agent alone at
 
 ## Answering policy
 
-`server/policy.py` holds four sections, composed onto the base prompt by
-`policy.apply()`. Three are always on; only the last can be switched off.
+`server/policy.py` holds three sections, composed onto the base prompt by
+`policy.apply()`. All three are always on -- there is no topic restriction, so
+the assistant answers questions on any subject.
 
 | Section | Request | Behaviour |
 | --- | --- | --- |
 | Secrets | API keys, passwords, tokens, env file contents | Replies exactly `I can't answer these type of questions.` and calls no tool |
 | Identity | "who are you", "are you ChatGPT", "which model are you" | Answers as SIMP, built by an independent developer; never names the model or provider |
 | Conduct | Rudeness, swearing, insults | Answers the question anyway, in a level tone — see below |
-| Topic *(off)* | Anything outside IT / technology | Says it only covers IT topics; calls no tool |
 
 ### Identity
 
@@ -84,12 +84,6 @@ The turn-counting version of that fourth rule did not work — models do not
 reliably count "third message running". Triggering on *whether it has happened
 before in this conversation* is a presence check they can actually see, and it
 fires reliably.
-
-The topic restriction is still isolated enough to lift in one step:
-
-```bash
-TOPIC_POLICY=off   # in .env.local, then restart the agent
-```
 
 ## Tracing (optional)
 

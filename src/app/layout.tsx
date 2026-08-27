@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { ToastContainer } from "@/components/ui/toast";
 import { ThemeProvider } from "@/lib/theme";
@@ -53,6 +54,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-full flex flex-col">
+        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" async defer />
         <ThemeProvider>
           {children}
           <ToastContainer />
