@@ -35,9 +35,7 @@ Environment variables to set on Render:
 | `MONGODB_URI` | the Atlas connection string |
 | `MONGODB_DB` | `mantraa_ai` |
 | `AGENT_TOKEN` | a long random string -- **the same one goes on Vercel** |
-| `IMAGE_API_KEY` | optional -- image generation falls back to a keyless provider without it |
-| `VIDEO_API_KEY` | **required for video**, which has no keyless fallback. Unset, the Video Generator reports itself off and the agent is not offered the tool |
-| `VIDEO_MODEL` | optional -- picks both the price and the lengths on offer (see README) |
+| `VOYAGE_API_KEY` | **required for Inbuilt RAG**. Unset, `search_document` is not offered to the model and `/documents` cannot index |
 | `LLM_MODEL`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
 | `PYTHON_VERSION` | `3.11.9` |
 
@@ -65,19 +63,27 @@ Import the same repo; the defaults for a Next.js project are correct and
 | `AGENT_TOKEN` | the same value as on Render |
 | `MONGODB_URI`, `MONGODB_DB` | Atlas -- Next.js reads it directly for auth, sessions and credits |
 
-**Video generation needs a Vercel plan that allows long functions.** A clip
-takes one to three minutes on the provider, and `/api/videos/generate` holds the
-request open for all of it -- it declares `maxDuration = 300`, which Hobby caps
-at 60 seconds. On Hobby the request is killed mid-render while the agent on
-Render carries on and finishes, so the clip is generated, stored and billed, but
-the browser sees a timeout instead of a video. Either deploy on Pro or leave
-`VIDEO_API_KEY` unset, which switches the feature off cleanly rather than
-half-working. Image generation is unaffected: it fits inside 60 seconds.
+**Document indexing needs a Vercel plan that allows long functions.** Voyage's
+free tier is rate limited per minute, so a document worth more than one minute
+of tokens is embedded in batches spread across several minutes (see `rag.embed`)
+-- and `/api/documents/ingest` holds the request open for all of it. It declares
+`maxDuration = 300`, which Hobby caps at 60 seconds. On Hobby a long document's
+request is killed mid-index while the agent on Render carries on and finishes,
+so the chunks land in Atlas but the browser sees a timeout instead of the new
+conversation. Deploy on Pro, or keep indexed documents small enough to finish
+inside 60 seconds -- `/documents` estimates the wait before you submit.
 
 **`MONGODB_DB` is required on Vercel, not optional.** Without it `getDb` refuses
 rather than falling back to `test`, and every signed-in request answers 503 --
 which shows up in the chat window as a notice about the database, from a
 deployment where Atlas itself is perfectly healthy.
+
+**Vercel Functions cap a request body at 4.5MB, and this is not configurable.**
+A large attachment (see `src/lib/attachments.ts`) is capped well under that
+client-side -- `MAX_EXTRACTED_CHARS`, not the file's own byte size, which
+document formats like PDF and DOCX can exceed by a lot before their extracted
+text does. Raising the file-size cap alone would work locally, where nothing
+sits in front of the agent, and then 413 in production.
 
 Confirm the deploy the same way you confirm Render's:
 

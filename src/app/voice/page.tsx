@@ -5,13 +5,18 @@ import {
   AlertCircle,
   Mic,
   PhoneOff,
+  Sparkles,
+  UserPlus,
   X,
 } from "lucide-react";
 import { AppShell } from "@/components/chat/app-shell";
 import { AIMessage, UserMessage } from "@/components/chat/chat-messages";
 import { MessageMarkdown } from "@/components/chat/message-markdown";
+import { AuthModal } from "@/components/auth/auth-modal";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useSession } from "@/lib/auth";
+import { GUEST_VOICE_TURNS } from "@/lib/limits";
 import { useChat } from "@/lib/useChat";
 import { useVoiceCall, type CallPhase } from "@/lib/useVoiceCall";
 import type { Message } from "@/lib/types";
@@ -238,12 +243,30 @@ function VoiceCall() {
   const call = useVoiceCall(chat);
   const look = PHASES[call.phase];
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const { user } = useSession();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  // A signed-out visitor gets GUEST_VOICE_TURNS spoken turns. Counted from the
+  // transcript rather than tracked separately, so it cannot fall out of step
+  // with what was actually sent -- and enforced again in /api/chat, which is
+  // what really stops a turn.
+  const guestTurnsUsed = chat.messages.filter((m) => m.role === "user").length;
+  const guestLimitReached = !user && guestTurnsUsed >= GUEST_VOICE_TURNS;
 
   // Opens itself the moment the AI starts talking, same as the chat page's
   // Sources panel opens itself off a "N sources" chip -- no manual toggle here.
   useEffect(() => {
     if (call.phase === "speaking") setTranscriptOpen(true);
   }, [call.phase]);
+
+  // Hang up as soon as the last free turn has been answered. Leaving the mic
+  // open would let someone keep talking into a call whose next turn the route
+  // is already going to refuse.
+  const callEnd = call.end;
+  const callActive = call.active;
+  useEffect(() => {
+    if (guestLimitReached && callActive) callEnd();
+  }, [guestLimitReached, callActive, callEnd]);
 
   // What the recogniser has settled on this turn, plus what it is still deciding.
   const saying = [call.heard, call.interim].filter(Boolean).join(" ");
@@ -330,7 +353,7 @@ function VoiceCall() {
           ) : (
             <Button
               onClick={call.start}
-              disabled={!call.supported}
+              disabled={!call.supported || guestLimitReached}
               className="gap-2 rounded-full px-6 shadow-md cursor-pointer"
             >
               <Mic className="size-4" /> Start call
@@ -338,7 +361,46 @@ function VoiceCall() {
           )}
         </div>
 
+        {/* Stacked, not the chat page's side-by-side version of this card: that
+            one sits in a max-w-3xl column and has room for two columns, where
+            this page is a narrow centred stack and would wrap every line to
+            three words. */}
+        {guestLimitReached && (
+          <div className="w-full max-w-sm rounded-2xl border border-primary/40 bg-sidebar/95 p-5 text-center shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="mx-auto grid size-11 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
+              <UserPlus className="size-5" />
+            </div>
+
+            <p className="mt-3 font-display text-[15px] font-bold tracking-tight text-foreground">
+              Guest limit reached
+            </p>
+            <p className="mt-1 text-[10.5px] font-semibold uppercase tracking-wider text-primary">
+              {GUEST_VOICE_TURNS} of {GUEST_VOICE_TURNS} voice turns used
+            </p>
+
+            <p className="mt-2.5 text-[12.5px] leading-relaxed text-muted-foreground">
+              Create a free account or log in to get{" "}
+              <strong className="font-semibold text-foreground">50 free credits</strong> and keep
+              talking.
+            </p>
+
+            <Button
+              onClick={() => setAuthModalOpen(true)}
+              className="mt-4 w-full justify-center gap-2 text-xs font-semibold cursor-pointer shadow-md shadow-primary/25"
+            >
+              <Sparkles className="size-3.5 text-amber-300" /> Create Free Account / Log In
+            </Button>
+          </div>
+        )}
+
         <div className="w-full max-w-sm space-y-2">
+          {!user && !guestLimitReached && (
+            <Notice>
+              You are not signed in, so this call is limited to {GUEST_VOICE_TURNS} turns
+              {guestTurnsUsed > 0 ? ` (${guestTurnsUsed} used)` : ""}. Signing in lifts it and
+              saves the transcript.
+            </Notice>
+          )}
           {!call.supported && (
             <Notice>
               This browser has no Web Speech API, so there is nothing to listen with.
@@ -355,6 +417,8 @@ function VoiceCall() {
           {call.speechError && <Notice>{call.speechError}</Notice>}
         </div>
       </div>
+
+      <AuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </AppShell>
   );
 }

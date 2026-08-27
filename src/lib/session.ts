@@ -8,6 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
+import { isDeveloper } from "@/lib/limits";
 import { getDb } from "@/lib/mongodb";
 import type { Db } from "mongodb";
 
@@ -23,6 +24,9 @@ export type SessionUser = {
   plan: "none" | "free" | "paid";
   credits: number;
   planActivatedAt?: string;
+  /** True once this account has spent its one Inbuilt RAG document. Always
+   *  false for a developer account, which has no such cap. */
+  ragUsed: boolean;
 };
 
 /**
@@ -116,6 +120,7 @@ export async function currentUser(): Promise<SessionUser | null> {
     plan: user.plan ?? "none",
     credits: typeof user.credits === "number" ? user.credits : 0,
     planActivatedAt: user.planActivatedAt ?? "",
+    ragUsed: isDeveloper(String(user.email)) ? false : user.ragUsed === true,
   };
 }
 

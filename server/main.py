@@ -10,6 +10,7 @@ data produced by the running system; there are no fixtures.
 """
 
 import os
+import re
 import threading
 from pathlib import Path
 from typing import List, Optional
@@ -30,13 +31,12 @@ from pydantic import BaseModel, Field
 load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-import images  # noqa: E402
 import llm  # noqa: E402
+import rag  # noqa: E402
 import store  # noqa: E402
 import tts  # noqa: E402
-import video  # noqa: E402
 from agent import stream_chat  # noqa: E402  (needs env loaded first)
-from tools import IMAGE_PATH, VIDEO_PATH, registry  # noqa: E402
+from tools import registry  # noqa: E402
 
 app = FastAPI(title="SIMP AI agent", version="1.0.0")
 
@@ -95,25 +95,6 @@ class AuthRequest(BaseModel):
     password_hash: str
 
 
-class ImageRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=1200)
-    size: Optional[str] = None
-    style: Optional[str] = None
-    seed: Optional[int] = None
-
-
-class VideoRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=1200)
-    # Bounded here as well as clamped in video.py: this is the open edge, and
-    # 300 seconds of nova-reel is $24 of someone else's money.
-    duration: Optional[int] = Field(default=None, ge=1, le=15)
-    aspect: Optional[str] = None
-    style: Optional[str] = None
-    resolution: Optional[str] = None
-    audio: bool = False
-    seed: Optional[int] = None
-
-
 class SpeechRequest(BaseModel):
     text: str = Field(..., min_length=1)
     voice: Optional[str] = None
@@ -127,6 +108,18 @@ class ProfileUpdateRequest(BaseModel):
     avatarImage: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
+
+
+class DocumentIngestRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    # The /documents "advanced settings" card -- None on each means "use
+    # default settings", which rag.ingest applies via clamp_chunking /
+    # clamp_dimension. Bounds beyond that (chunk size, dimension whitelist)
+    # are enforced there too, not trusted from the request alone.
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    dimension: Optional[int] = None
 
 
 @app.get("/health")
@@ -145,8 +138,6 @@ def health():
         "storage": store.status(),
         "auth_required": bool(AGENT_TOKEN),
         "speech": tts.status(),
-        "images": images.status(),
-        "video": video.status(),
     }
 
 
@@ -218,144 +209,11 @@ def tts_speak(req: SpeechRequest):
     )
 
 
-@app.get("/images")
-def image_status(x_user_email: UserEmail = Header(default=None)):
-    """Which image model the Tools page will use, and what it has made before.
-
-    The stored row holds the id and not the path -- the id is the durable half,
-    the path is this app's routing -- so the URL is composed here, from the same
-    constant the chat tool returns. A row without one renders as nothing at all.
-    """
-    recent = [
-        {
-            **{k: v for k, v in row.items() if k not in ("user_email", "mime", "bytes")},
-            "url": IMAGE_PATH.format(row["id"]),
-        }
-        for row in store.list_images(x_user_email)
-        if row.get("id")
-    ]
-    return {**images.status(), "recent": recent}
-
-
-@app.post("/images/generate")
-def image_generate(req: ImageRequest, x_user_email: UserEmail = Header(default=None)):
-    """Generate one image and return the id it is served under.
-
-    `def`, not `async def`, for the same reason as /tts: a generation blocks for
-    seconds on a provider round trip, and FastAPI keeps that off the event loop
-    the chat stream is riding on.
-    """
-    try:
-        result = images.generate(req.prompt, req.size, req.style, req.seed)
-    except ValueError as exc:
-        # Something the caller can fix: an empty prompt, or no provider set up.
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        # 502: the provider failed, not us. The message is its own wording.
-        raise HTTPException(status_code=502, detail=str(exc) or type(exc).__name__)
-
-    meta = {k: v for k, v in result.items() if k not in ("data", "mime", "full_prompt")}
-    image_id = store.save_image(result["data"], result["mime"], meta, x_user_email)
-    return {"id": image_id, "url": IMAGE_PATH.format(image_id), **meta}
-
-
-@app.get("/images/{image_id}")
-def image_bytes(image_id: str):
-    """Serve one stored image.
-
-    Addressed by a content id that is never reused, so it can be cached hard --
-    which is what keeps reopening a thread full of pictures free.
-    """
-    found = store.get_image(image_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="Image not found or expired")
-
-    return Response(
-        content=found["data"],
-        media_type=found["mime"],
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
-    )
-
-
-@app.get("/videos")
-def video_status(x_user_email: UserEmail = Header(default=None)):
-    """Which video model the Tools page will use, and what it has made before.
-
-    Mirrors /images exactly, including composing the URL here from the id --
-    the id is the durable half, the path is this app's routing.
-    """
-    recent = [
-        {
-            **{k: v for k, v in row.items() if k not in ("user_email", "mime", "bytes")},
-            "url": VIDEO_PATH.format(row["id"]),
-        }
-        for row in store.list_videos(x_user_email)
-        if row.get("id")
-    ]
-    return {**video.status(), "recent": recent}
-
-
-@app.post("/videos/generate")
-def video_generate(req: VideoRequest, x_user_email: UserEmail = Header(default=None)):
-    """Generate one clip and return the id it is served under.
-
-    `def`, not `async def`, for the same reason as /images/generate, only more
-    so: this blocks for one to three minutes on the provider, and that must not
-    sit on the event loop the chat stream is riding on.
-    """
-    try:
-        result = video.generate(
-            req.prompt,
-            duration=req.duration,
-            aspect=req.aspect,
-            style=req.style,
-            resolution=req.resolution,
-            audio=req.audio,
-            seed=req.seed,
-        )
-    except ValueError as exc:
-        # Something the caller can fix: an empty prompt, or no key configured.
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        # 502: the provider failed, not us. The message is its own wording.
-        raise HTTPException(status_code=502, detail=str(exc) or type(exc).__name__)
-
-    meta = {k: v for k, v in result.items() if k not in ("data", "mime", "full_prompt")}
-    try:
-        video_id = store.save_video(result["data"], result["mime"], meta, x_user_email)
-    except ValueError as exc:
-        # The clip exists but will not fit. It has already been paid for, so say
-        # exactly what to change rather than reporting a generic failure.
-        raise HTTPException(status_code=413, detail=str(exc))
-
-    return {"id": video_id, "url": VIDEO_PATH.format(video_id), **meta}
-
-
-@app.get("/videos/{video_id}")
-def video_bytes(video_id: str):
-    """Serve one stored clip.
-
-    Accept-Ranges matters here in a way it does not for a picture: without it a
-    browser cannot seek in the video element, and Safari will not play at all.
-    """
-    found = store.get_video(video_id)
-    if found is None:
-        raise HTTPException(status_code=404, detail="Video not found or expired")
-
-    return Response(
-        content=found["data"],
-        media_type=found["mime"],
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(len(found["data"])),
-        },
-    )
-
-
 @app.get("/conversations")
-def conversations(x_user_email: UserEmail = Header(default=None)):
-    return {"conversations": store.list_conversations(x_user_email)}
+def conversations(kind: str = "chat", x_user_email: UserEmail = Header(default=None)):
+    """kind="chat" (default) is Recent Chat; kind="rag" is the list the
+    sidebar shows under Inbuilt RAG -- see store.list_conversations."""
+    return {"conversations": store.list_conversations(x_user_email, kind=kind)}
 
 
 @app.get("/conversations/{conversation_id}")
@@ -375,6 +233,118 @@ def remove_conversation(
     return {"deleted": conversation_id}
 
 
+@app.post("/documents/ingest")
+def documents_ingest(req: DocumentIngestRequest, x_user_email: UserEmail = Header(default=None)):
+    """Index a document on its own, before any question is asked.
+
+    The two-phase entry point behind /documents: attach or paste, index,
+    *then* the conversation opens and questions get asked in the normal chat
+    view -- as opposed to attaching one mid-chat, where indexing happens as a
+    side effect of sending the first message (see _route_large_attachments
+    below). Both land in the same place: rag.ingest, the same tables, the
+    same search_document tool.
+    """
+    if not x_user_email:
+        raise HTTPException(status_code=401, detail="Sign in to index a document.")
+
+    # One document per account, for the lifetime of the account -- claimed
+    # before any work is done so two simultaneous ingests cannot both get
+    # through. Released again below if the indexing itself fails, so a rate
+    # limit or an Atlas outage does not spend someone's only allowance.
+    if not store.claim_rag_slot(x_user_email):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "You have already used your one document. Inbuilt RAG is limited to a "
+                "single indexed document per account, and deleting the conversation "
+                "does not free it up."
+            ),
+        )
+
+    conversation_id = store.create_conversation(req.name, x_user_email, kind="rag")
+    if conversation_id is None:
+        store.release_rag_slot(x_user_email)
+        raise HTTPException(status_code=401, detail="Sign in to index a document.")
+
+    try:
+        result = rag.ingest(
+            conversation_id,
+            req.name,
+            req.text,
+            chunk_size=req.chunk_size,
+            chunk_overlap=req.chunk_overlap,
+            dimension=req.dimension,
+        )
+    except ValueError as exc:
+        # An out-of-range "advanced setting" -- e.g. a dimension Voyage does
+        # not support -- is the caller's mistake to fix, not a 502.
+        store.release_rag_slot(x_user_email)
+        store.delete_conversation(conversation_id, x_user_email)
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        store.release_rag_slot(x_user_email)
+        store.delete_conversation(conversation_id, x_user_email)
+        raise HTTPException(status_code=502, detail=rag.friendly_error(exc))
+
+    # So the conversation is not simply empty the moment it opens -- this is
+    # the first thing there is to see before any question has been asked.
+    note = (
+        f'Document "{result["name"]}" is indexed and ready ({result["chunks"]} '
+        "chunks). Ask me anything about it."
+    )
+    store.append_message(conversation_id, "assistant", note)
+
+    return {
+        "conversation_id": conversation_id,
+        "name": result["name"],
+        "chunks": result["chunks"],
+        "chunk_size": result["chunk_size"],
+        "chunk_overlap": result["chunk_overlap"],
+        "dimension": result["dimension"],
+    }
+
+
+# Matches one ===ATTACHMENT_START:name===...===ATTACHMENT_END=== block built by
+# src/lib/attachments.ts's buildMessage -- see _route_large_attachments below.
+_ATTACHMENT_BLOCK = re.compile(
+    r"===ATTACHMENT_START:(.+?)===\n(.*?)\n===ATTACHMENT_END===", re.DOTALL
+)
+# Cheap presence check, so /chat can decide whether to show an "indexing your
+# document" tool card before paying for the regex substitution + the ingest
+# (embedding, storing, waiting for the index) it may trigger.
+_HAS_LARGE_ATTACHMENT = re.compile(r"===ATTACHMENT_START:.+\(large\)===")
+
+
+def _route_large_attachments(content: str, conversation_id: Optional[str]) -> str:
+    """A "(large)" attachment (see attachments.ts's MAX_CHARS) is indexed for
+    retrieval instead of pasted whole into the model's context.
+
+    Guests keep the old behaviour -- inline, unindexed -- since there is no
+    conversation id to scope chunks to, and nothing durable to index them
+    into once the tab closes anyway.
+    """
+
+    def replace(match: "re.Match[str]") -> str:
+        header, body = match.group(1), match.group(2)
+        if not conversation_id or not header.rstrip().endswith("(large)"):
+            return match.group(0)
+
+        name = re.sub(r"\s*\(large\)$", "", header).strip()
+        try:
+            result = rag.ingest(conversation_id, name, body)
+            note = (
+                "[This document was indexed for search ({} chunks). Call "
+                "search_document to read the relevant part before answering "
+                "questions about it.]"
+            ).format(result["chunks"])
+        except Exception as exc:
+            note = f"[Could not index this document: {rag.friendly_error(exc)}]"
+
+        return f"===ATTACHMENT_START:{name} (indexed)===\n{note}\n===ATTACHMENT_END==="
+
+    return _ATTACHMENT_BLOCK.sub(replace, content)
+
+
 @app.post("/chat")
 def chat(req: ChatRequest, x_user_email: UserEmail = Header(default=None)):
     history = [{"role": m.role, "content": m.content} for m in req.messages]
@@ -388,13 +358,28 @@ def chat(req: ChatRequest, x_user_email: UserEmail = Header(default=None)):
     if conversation_id is None:
         conversation_id = store.create_conversation(history[0]["content"], x_user_email)
 
-    store.append_message(conversation_id, "user", history[-1]["content"])
-
     def events():
         # Tell the client which conversation this turn belongs to (null for guests).
         yield '{"type": "conversation", "id": %s}\n' % (
             '"%s"' % conversation_id if conversation_id else "null"
         )
+
+        # Large attachments are indexed here, before either the model or the
+        # database sees the raw text -- see rag.py. Wrapped in a synthetic
+        # tool call/result pair so the UI shows an "indexing" card instead of
+        # sitting on a blank screen: ingest plus the wait for the Atlas index
+        # to catch up (rag._wait_until_searchable) can take several seconds,
+        # and that would otherwise all happen before the first byte of this
+        # response goes out.
+        content = history[-1]["content"]
+        if conversation_id and _HAS_LARGE_ATTACHMENT.search(content):
+            yield '{"type": "tool_call", "name": "index_document", "args": "{}"}\n'
+            content = _route_large_attachments(content, conversation_id)
+            yield '{"type": "tool_result", "name": "index_document", "result": "{}"}\n'
+        history[-1]["content"] = content
+
+        store.append_message(conversation_id, "user", content)
+
         for chunk in stream_chat(history, conversation_id, req.voice):
             yield chunk
 

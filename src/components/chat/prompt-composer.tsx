@@ -137,7 +137,7 @@ export function PromptComposer({
             >
               <FileText className="size-3" />
               {file.name}
-              {file.truncated && <span className="text-warning">truncated</span>}
+              {file.large && <span className="text-primary">will be indexed</span>}
               <button
                 onClick={() => setAttachments((prev) => prev.filter((_, x) => x !== i))}
                 aria-label={`Remove ${file.name}`}

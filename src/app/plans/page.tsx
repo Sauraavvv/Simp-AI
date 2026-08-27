@@ -20,16 +20,12 @@ import { cn } from "@/lib/utils";
 
 const FAQS = [
   {
-    q: "How many AI images can I generate?",
-    a: "Free accounts get 1 free AI image generation.",
-  },
-  {
     q: "How do the 50 free chat credits work?",
     a: "When you activate the Free Plan after logging in or registering, you receive 50 prompt credits instantly. Each message or prompt sent to SIMP AI consumes 1 credit.",
   },
   {
-    q: "What happens when I reach 0 credits or max image quota?",
-    a: "Chatting and image generation will pause once your free quota is reached.",
+    q: "What happens when I reach 0 credits?",
+    a: "Chatting will pause once your free quota is reached.",
   },
 ];
 
@@ -155,10 +151,6 @@ export default function PlansPage() {
                 </p>
                 <ul className="space-y-2.5 text-xs text-muted-foreground">
                   <li className="flex items-center gap-2 font-medium text-foreground">
-                    <Check className="size-4 text-emerald-400 shrink-0" />
-                    <span>1 Free AI Image Generation</span>
-                  </li>
-                  <li className="flex items-center gap-2">
                     <Check className="size-4 text-emerald-400 shrink-0" />
                     <span>50 Total AI Chat Message turns</span>
                   </li>

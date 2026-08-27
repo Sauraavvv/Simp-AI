@@ -51,87 +51,6 @@ export type ToolInfo = {
   available?: boolean;
 };
 
-/** One picture the image tool produced, as the agent describes it. */
-export type GeneratedImage = {
-  /** Path on this origin -- /api/images/<id>. Never the provider's own link. */
-  url: string;
-  prompt: string;
-  width: number;
-  height: number;
-  size: string;
-  style?: string;
-  seed?: number;
-  provider: string;
-  model: string;
-  created_at?: string;
-};
-
-export type ImageQuota = {
-  plan: "free" | "paid" | "none";
-  maxImages: number;
-  usedImages: number;
-  remainingImages: number;
-  canGenerate: boolean;
-};
-
-/** Which image model the agent will call, plus this account's recent work and quota. */
-export type ImageToolStatus = {
-  available: boolean;
-  provider: string;
-  model: string;
-  key_loaded: boolean;
-  sizes: string[];
-  styles: string[];
-  recent?: GeneratedImage[];
-  quota?: ImageQuota;
-};
-
-/** One clip the video tool produced, as the agent describes it. */
-export type GeneratedVideo = {
-  /** Path on this origin -- /api/videos/<id>. Never the provider's own link. */
-  url: string;
-  prompt: string;
-  /** Length in seconds, as generated -- may be shorter than requested if the
-   *  configured model could not reach the asked-for rung. */
-  duration: number;
-  aspect: string;
-  aspect_ratio: string;
-  resolution?: string;
-  style?: string;
-  audio?: boolean;
-  provider: string;
-  model: string;
-  cost_usd?: number;
-  created_at?: string;
-};
-
-export type VideoQuota = {
-  plan: "free" | "paid" | "none";
-  maxVideos: number;
-  usedVideos: number;
-  remainingVideos: number;
-  canGenerate: boolean;
-};
-
-/** What the video tool is configured to do, from the Python side. */
-export type VideoToolStatus = {
-  available: boolean;
-  provider: string;
-  model: string;
-  key_loaded: boolean;
-  /** Only the lengths the configured model can actually produce. */
-  durations: number[];
-  default_duration: number;
-  aspects: string[];
-  resolutions: string[];
-  styles: string[];
-  cost_per_second: number;
-  /** Set when the tool is off, explaining why. Empty when it is working. */
-  note?: string;
-  recent?: GeneratedVideo[];
-  quota?: VideoQuota;
-};
-
 /** Fired after a turn creates or updates a conversation, so the sidebar refetches. */
 export const CONVERSATIONS_CHANGED = "conversations:changed";
 export const SELECT_CONVERSATION = "conversations:select";
@@ -143,6 +62,7 @@ export const ACTIVE_CONVERSATION_CHANGED = "conversations:active-changed";
 export type Attachment = {
   name: string;
   text: string;
-  /** True when the file was longer than the read limit and got cut short. */
-  truncated: boolean;
+  /** True when the file is past the inline threshold -- the backend indexes it
+   *  for retrieval (RAG) instead of pasting the whole thing into context. */
+  large: boolean;
 };

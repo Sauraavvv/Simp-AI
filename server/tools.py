@@ -10,9 +10,8 @@ import json
 from typing import Any, Callable, Dict, List
 
 import duckduckgo
-import images
+import rag
 import store
-import video
 
 # --------------------------------------------------------------------------
 # implementations
@@ -49,6 +48,32 @@ def web_search(query: str, max_results: int = MAX_WEB_RESULTS) -> Dict[str, Any]
     }
 
 
+# How many chunks one lookup returns. Kept small on purpose: each chunk is a
+# few hundred tokens, and the model gets one search per message the same as
+# web_search -- see the ONCE_PER_TURN cap in agent.py -- so this has to be
+# enough to answer from in a single round rather than tuned down and reworded.
+MAX_DOCUMENT_RESULTS = 5
+
+
+def search_document(query: str) -> Dict[str, Any]:
+    """Search the document(s) attached to this conversation.
+
+    Scoped to the current turn by rag.CURRENT_CONVERSATION, set once per turn
+    in agent.stream_chat -- the model never supplies a conversation id itself.
+    """
+    query = str(query or "").strip()
+    if not query:
+        raise ValueError("A search query is required")
+
+    hits = rag.search(query, top_k=MAX_DOCUMENT_RESULTS)
+
+    return {
+        "query": query,
+        "result_count": len(hits),
+        "results": [{"document": h["name"], "text": h["text"]} for h in hits],
+    }
+
+
 MAX_OPTIONS = 4
 
 
@@ -76,114 +101,6 @@ def ask_options(question: str, options: List[str]) -> Dict[str, Any]:
             "box. Reply with one short line inviting them to choose. Do not answer the "
             "original question yet, do not repeat the options as text, and do not call "
             "any more tools."
-        ),
-    }
-
-
-# Where the browser fetches a stored image. The Next.js route of the same shape
-# proxies to this service, so the picture arrives from our own origin -- see
-# images.py for why nothing hands the provider's own link to the page.
-IMAGE_PATH = "/api/images/{}"
-
-
-def generate_image(prompt: str, size: str = "square", style: str = "none") -> Dict[str, Any]:
-    """Draw a picture from a written description.
-
-    The bytes are stored on the way through and only the id comes back: a data
-    URL would put a megabyte of base64 into the conversation document, the
-    stream and every later read of the thread.
-    """
-    prompt = str(prompt or "").strip()
-    if not prompt:
-        raise ValueError("Describe what the image should show")
-
-    result = images.generate(prompt, size=size, style=style)
-    image_id = store.save_image(
-        result["data"],
-        result["mime"],
-        {
-            "prompt": result["prompt"],
-            "style": result["style"],
-            "size": result["size"],
-            "width": result["width"],
-            "height": result["height"],
-            "seed": result["seed"],
-            "provider": result["provider"],
-            "model": result["model"],
-            "bytes": result["bytes"],
-        },
-    )
-
-    return {
-        "status": "generated",
-        "url": IMAGE_PATH.format(image_id),
-        "prompt": result["prompt"],
-        "size": result["size"],
-        "width": result["width"],
-        "height": result["height"],
-        "provider": result["provider"],
-        "model": result["model"],
-        "instruction": (
-            "The image is already on screen -- the UI rendered it from this result. "
-            "Reply with one short line about what you made. Do not paste the URL, do "
-            "not describe the picture in detail, and do not call any more tools."
-        ),
-    }
-
-
-# Where the browser fetches a stored clip, same arrangement as IMAGE_PATH above.
-VIDEO_PATH = "/api/videos/{}"
-
-
-def generate_video(
-    prompt: str,
-    duration: int = 5,
-    aspect: str = "landscape",
-    style: str = "none",
-) -> Dict[str, Any]:
-    """Make a short video from a written description.
-
-    Stored on the way through like a generated image, and for a stronger version
-    of the same reason: a clip is megabytes, so only the id travels back through
-    the stream and into the saved conversation.
-    """
-    prompt = str(prompt or "").strip()
-    if not prompt:
-        raise ValueError("Describe what the video should show")
-
-    result = video.generate(prompt, duration=duration, aspect=aspect, style=style)
-    video_id = store.save_video(
-        result["data"],
-        result["mime"],
-        {
-            "prompt": result["prompt"],
-            "style": result["style"],
-            "duration": result["duration"],
-            "aspect": result["aspect"],
-            "aspect_ratio": result["aspect_ratio"],
-            "resolution": result["resolution"],
-            "audio": result["audio"],
-            "provider": result["provider"],
-            "model": result["model"],
-            "bytes": result["bytes"],
-            "cost_usd": result["cost_usd"],
-        },
-    )
-
-    return {
-        "status": "generated",
-        "url": VIDEO_PATH.format(video_id),
-        "prompt": result["prompt"],
-        "duration": result["duration"],
-        "aspect": result["aspect"],
-        "aspect_ratio": result["aspect_ratio"],
-        "resolution": result["resolution"],
-        "provider": result["provider"],
-        "model": result["model"],
-        "instruction": (
-            "The video is already on screen -- the UI rendered it from this result. "
-            "Reply with one short line about what you made. Do not paste the URL, do "
-            "not describe the clip shot by shot, and do not call any more tools."
         ),
     }
 
@@ -230,95 +147,34 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    "generate_image": {
-        "fn": generate_image,
-        "reads": "an image model -- see server/images.py",
-        "writes": True,
+    "search_document": {
+        "fn": search_document,
+        "reads": "documents attached to this conversation -- see rag.py",
+        # Off entirely without a Voyage key: an offered tool that always
+        # comes back empty just spends tokens describing a dead end.
+        "available": lambda: bool(rag.VOYAGE_API_KEY),
         "schema": {
             "type": "function",
             "function": {
-                "name": "generate_image",
+                "name": "search_document",
                 "description": (
-                    "Create an image from a written description. Use this whenever the "
-                    "user asks you to draw, generate, design, illustrate or picture "
-                    "something, or asks for a logo, poster, icon, wallpaper or concept "
-                    "art. Write the prompt yourself: expand what they said into one "
-                    "vivid sentence naming the subject, setting, lighting and mood. You "
-                    "get one image per message, so do not call this twice."
+                    "Search a document the user attached to this conversation. Use "
+                    "this whenever they ask about a document they gave you, or their "
+                    "question depends on something only that document would say -- "
+                    "never guess or answer from general knowledge when a document is "
+                    "in play. Phrase the query as you would type it into a search box; "
+                    "it does not have to match the document's wording exactly. If it "
+                    "comes back empty, say so rather than making something up."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {
+                        "query": {
                             "type": "string",
-                            "description": "One vivid sentence describing the picture: subject, setting, lighting, mood.",
-                        },
-                        "size": {
-                            "type": "string",
-                            "enum": ["square", "portrait", "landscape"],
-                            "description": "Shape of the image. Square unless the subject suggests otherwise.",
-                        },
-                        "style": {
-                            "type": "string",
-                            "enum": ["none", "photo", "art", "anime", "3d", "sketch"],
-                            "description": "Visual treatment. Use 'none' unless the user named a look.",
+                            "description": "What to look for in the document.",
                         },
                     },
-                    "required": ["prompt"],
-                },
-            },
-        },
-    },
-    "generate_video": {
-        "fn": generate_video,
-        "reads": "a video model -- see server/video.py",
-        "writes": True,
-        # The only tool that can be switched off by configuration. Video has no
-        # free tier, so without a key every call would 401 -- and a tool the
-        # model can see is a tool it will try, then apologise for.
-        "available": lambda: video.status()["available"],
-        "schema": {
-            "type": "function",
-            "function": {
-                "name": "generate_video",
-                "description": (
-                    "Create a short video clip from a written description. Use this "
-                    "when the user asks you to animate something, or asks for a video, "
-                    "clip, animation, ad, trailer or b-roll. Write the prompt yourself: "
-                    "expand what they said into one vivid sentence naming the subject, "
-                    "the motion, the setting and the lighting -- motion is what makes a "
-                    "video prompt different from an image one, so always say what moves. "
-                    "This costs real money per second and takes 1-3 minutes, so call it "
-                    "once per message and only when a still image would not do."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "One vivid sentence: subject, motion, setting, lighting.",
-                        },
-                        "duration": {
-                            "type": "integer",
-                            "enum": [5, 10, 15],
-                            "description": (
-                                "Length in seconds. Use 5 unless the user asked for longer. "
-                                "Longer costs proportionally more, and a request the "
-                                "configured model cannot reach is shortened to its nearest."
-                            ),
-                        },
-                        "aspect": {
-                            "type": "string",
-                            "enum": ["landscape", "portrait"],
-                            "description": "Landscape unless the user wants it for a phone or a reel.",
-                        },
-                        "style": {
-                            "type": "string",
-                            "enum": ["none", "cinematic", "realistic", "anime", "3d", "timelapse"],
-                            "description": "Visual treatment. Use 'none' unless the user named a look.",
-                        },
-                    },
-                    "required": ["prompt"],
+                    "required": ["query"],
                 },
             },
         },
@@ -360,8 +216,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 def is_available(entry: Dict[str, Any]) -> bool:
     """Whether a tool can run right now.
 
-    Most tools are always on. One is not: video needs a funded key, and offering
-    it without one costs prompt tokens to advertise a certain failure.
+    Most tools are always on. One is not: search_document needs a Voyage key,
+    and offering it without one costs prompt tokens to advertise a certain
+    failure.
     """
     check = entry.get("available")
     if check is None:

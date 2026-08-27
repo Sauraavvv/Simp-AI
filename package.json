@@ -9,7 +9,8 @@
     "lint": "eslint",
     "setup:api": "cd server && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt",
     "setup:tts": "cd server && ./.venv/bin/python -c \"import sys; sys.version_info >= (3, 10) or sys.exit('\\nKittenTTS needs Python >= 3.10 (spaCy has no 3.9 build).\\nRebuild: rm -rf server/.venv && python3.10 -m venv server/.venv && npm run setup:api\\n')\" && ./.venv/bin/pip install -r requirements-tts.txt",
-    "dev:api": "cd server && ./.venv/bin/uvicorn main:app --reload --port 8000"
+    "dev:api": "cd server && ./.venv/bin/uvicorn main:app --reload --port 8000",
+    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs')\""
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
@@ -18,8 +19,10 @@
     "google-auth-library": "^11.0.2",
     "gsap": "^3.15.0",
     "lucide-react": "^1.33.0",
+    "mammoth": "^1.12.1",
     "mongodb": "^7.5.0",
     "next": "16.3.1",
+    "pdfjs-dist": "^6.2.108",
     "radix-ui": "^1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",

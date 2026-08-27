@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 import llm
 import policy
+import rag
 import store
 import tracing
 from tools import run_tool, tool_schemas
@@ -24,17 +25,12 @@ from tools import run_tool, tool_schemas
 MAX_TOOL_ROUNDS = 5
 
 # Web search is slow, rate-limited, and rewording a failed query rarely helps --
-# so it runs at most once per turn. Image generation is capped for a blunter
-# reason: it is the one tool here that costs real money per call on a keyed
-# provider, and a model that decides its first attempt was not good enough
-# would happily spend all five rounds redrawing it. Everything else is
-# deduplicated by arguments.
+# so it runs at most once per turn. Everything else is deduplicated by arguments.
 #
-# generate_video is capped hardest of all, because both halves of that argument
-# are worse for it: a clip costs cents rather than fractions of one, and takes
-# minutes rather than seconds, so a model retrying it twice would bill the user
-# twice and stall the turn past any reasonable wait.
-ONCE_PER_TURN = {"web_search", "ask_options", "generate_image", "generate_video"}
+# search_document joins it for the same two reasons at once: Voyage's own
+# free-tier rate limit is tight, and a reworded query rarely surfaces something
+# the first one missed.
+ONCE_PER_TURN = {"web_search", "ask_options", "search_document"}
 
 # How hard gpt-oss thinks before it answers. Groq's default is "medium", which
 # costs a second or two of silence per round -- unnoticeable in a written chat,
@@ -72,17 +68,24 @@ prose. The UI already shows the pages you searched in a separate Sources panel, 
 never append a "Source:" line, a bare URL, or a citation marker like 【...】 to your
 answer -- just write the answer naturally, as if you already knew it.
 
+A document the user attached or pasted for this conversation is never pasted
+into it -- you will see only a short note that it was indexed, instead of its
+text, either replacing it inline in their message or as the first message of
+the conversation on its own (from the dedicated "Chat with a Document" page,
+before they have asked anything yet). Either way, treat the presence of that
+note as reason enough on its own: call search_document to read the relevant
+part before answering any question that could plausibly be about that
+document, even a general-sounding one -- do not default to web_search or your
+own knowledge for something the attached document would answer, do not answer
+from the filename or the note alone, and do not claim you cannot see the
+document when a search would answer it.
+
 Always format all responses and web search results as clean, normal natural language text using Markdown (lists, headers, bold text, links). NEVER output raw JSON objects, raw tool call parameters, or code blocks containing raw JSON responses unless explicitly asked by the user to return JSON.
 
 When a question is ambiguous and the answer would genuinely differ by choice --
 above all, a programming concept with no language named ("what is a for loop") --
 call ask_options first with 3 concrete choices instead of guessing or answering
 for every option at once. Once the user has chosen, answer for that choice only.
-
-Call generate_image when the user asks for a picture -- drawn, generated, designed,
-illustrated, a logo, poster, icon or wallpaper. The image is displayed by the UI
-from the tool result, so afterwards write one short line about what you made and
-nothing else: never paste the URL and never describe the picture back to them.
 
 If a tool returns an error, tell the user what failed plainly in natural language rather than printing raw JSON.
 
@@ -454,6 +457,15 @@ def stream_chat(
                     continue
 
                 yield _event(type="tool_call", name=name, args=args)
+
+                # Re-set immediately before the call it is for, not just once
+                # at the top of this function: a plain generator's context can
+                # move to a different worker thread across a yield (Starlette
+                # iterates a sync generator via anyio's threadpool), which
+                # silently drops a contextvar set earlier and never touched
+                # again. Setting it right here, with no yield between this
+                # line and run_tool, closes that gap.
+                rag.CURRENT_CONVERSATION.set(conversation_id)
 
                 step = turn.child(name, "tool", _json(args, "input"))
                 started = time.monotonic()

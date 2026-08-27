@@ -83,6 +83,16 @@ def _get_db():
     return None
 
 
+def get_db_or_none():
+    """The raw Atlas database handle, or None if unreachable.
+
+    For modules that need a collection this file has no helper for (rag.py's
+    document_chunks) rather than duplicating the connect-with-fallback dance
+    above.
+    """
+    return _get_db()
+
+
 def status() -> Dict[str, Any]:
     """Where state is actually going, for /health.
 
@@ -184,8 +194,16 @@ def _clean_doc(doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 
-def create_conversation(first_message: str, user_email: Optional[str] = None) -> Optional[str]:
-    """Start a stored thread for a signed-in user. Guests get None -- nothing persists."""
+def create_conversation(
+    first_message: str, user_email: Optional[str] = None, kind: str = "chat"
+) -> Optional[str]:
+    """Start a stored thread for a signed-in user. Guests get None -- nothing persists.
+
+    `kind` is "chat" for an ordinary conversation, or "rag" for one created by
+    /documents/ingest -- see list_conversations, which the sidebar uses to
+    keep the two apart: "rag" ones get their own list under the Inbuilt RAG
+    nav entry rather than showing up in Recent Chat.
+    """
     owner = _owner(user_email)
     if owner is None:
         return None
@@ -196,6 +214,7 @@ def create_conversation(first_message: str, user_email: Optional[str] = None) ->
         "id": conversation_id,
         "user_email": owner,
         "title": _title_from(first_message),
+        "kind": kind,
         "created_at": now_ts,
         "updated_at": now_ts,
         "messages": [],
@@ -249,9 +268,15 @@ def append_message(
             if role == "assistant" and doc:
                 messages = doc.get("messages", [])
                 user_msg = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-                smart_title = extract_smart_title(user_msg, content)
-                if smart_title:
-                    update_payload["$set"]["title"] = smart_title
+                # No preceding user turn -- an assistant-only conversation, as
+                # documents_ingest creates one to confirm indexing before any
+                # question is asked. Retitling from an empty prompt is what
+                # used to collapse every one of these to "Attachment File",
+                # overwriting the real title create_conversation already set.
+                if user_msg:
+                    smart_title = extract_smart_title(user_msg, content)
+                    if smart_title:
+                        update_payload["$set"]["title"] = smart_title
 
             db.conversations.update_one(
                 {"id": conversation_id},
@@ -268,9 +293,10 @@ def append_message(
             conversation["updated_at"] = now_ts
             if role == "assistant":
                 user_msg = next((m.get("content", "") for m in reversed(conversation["messages"]) if m.get("role") == "user"), "")
-                smart_title = extract_smart_title(user_msg, content)
-                if smart_title:
-                    conversation["title"] = smart_title
+                if user_msg:
+                    smart_title = extract_smart_title(user_msg, content)
+                    if smart_title:
+                        conversation["title"] = smart_title
 
 
 def get_conversation(
@@ -295,15 +321,23 @@ def get_conversation(
         return dict(c) if c and c.get("user_email") == owner else None
 
 
-def list_conversations(user_email: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_conversations(user_email: Optional[str] = None, kind: str = "chat") -> List[Dict[str, Any]]:
     """Newest first, without the message bodies -- the sidebar only needs titles.
 
     Scoped to one account; a guest gets an empty list and so never sees a
     thread picker.
+
+    `kind="chat"` (the default) is every ordinary conversation, including
+    ones from before this field existed -- $ne "rag" matches a missing field
+    too, so nothing already stored needs a migration. `kind="rag"` is the
+    reverse: only conversations from /documents/ingest, which the sidebar
+    lists separately under Inbuilt RAG rather than mixing into Recent Chat.
     """
     owner = _owner(user_email)
     if owner is None:
         return []
+
+    kind_filter: Dict[str, Any] = {"kind": "rag"} if kind == "rag" else {"kind": {"$ne": "rag"}}
 
     db = _get_db()
     if db is not None:
@@ -312,7 +346,7 @@ def list_conversations(user_email: Optional[str] = None) -> List[Dict[str, Any]]
             # drag every message body of every thread over the wire just to
             # call len() on it -- the sidebar only shows titles.
             cursor = db.conversations.find(
-                {"user_email": owner},
+                {"user_email": owner, **kind_filter},
                 {
                     "_id": 0,
                     "id": 1,
@@ -346,6 +380,7 @@ def list_conversations(user_email: Optional[str] = None) -> List[Dict[str, Any]]
             }
             for c in _memory_conversations.values()
             if c.get("user_email") == owner
+            and (c.get("kind", "chat") == "rag") == (kind == "rag")
         ]
     rows.sort(key=lambda c: c["updated_at"], reverse=True)
     return rows
@@ -445,6 +480,94 @@ def get_user(email: str) -> Optional[Dict[str, Any]]:
         return dict(user) if user else None
 
 
+# Accounts exempt from the one-RAG-per-account cap below -- the developer's
+# own, so the app can be exercised end to end without spending the single
+# allowance every other account gets. Mirrored on the Next side by
+# src/lib/limits.ts's isDeveloper, which reads the same variable.
+DEVELOPER_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("DEVELOPER_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def is_developer(email: Optional[str]) -> bool:
+    owner = _owner(email)
+    return bool(owner and owner in DEVELOPER_EMAILS)
+
+
+def claim_rag_slot(email: str) -> bool:
+    """Take this account's one-and-only RAG allowance. True if it was still free.
+
+    Deliberately a lifetime claim rather than a count of live conversations:
+    deleting the indexed document does not hand the slot back, so the flag has
+    to outlive the conversation it was spent on.
+
+    One atomic find_one_and_update, not a read followed by a write, because two
+    ingests started at once would both pass a separate check and both index --
+    which is exactly the thing this is here to prevent. Filtering on
+    `ragUsed != True` inside the update is what makes the loser of that race
+    lose it.
+
+    Developers are exempt and always get True without touching the flag.
+    """
+    owner = _owner(email)
+    if not owner:
+        return False
+    if is_developer(owner):
+        return True
+
+    db = _get_db()
+    if db is not None:
+        try:
+            claimed = db.users.find_one_and_update(
+                {"email": owner, "ragUsed": {"$ne": True}},
+                {"$set": {"ragUsed": True, "ragUsedAt": _now()}},
+            )
+            return claimed is not None
+        except Exception as err:
+            # A metering outage must not take the feature down with it, the
+            # same call the credit checks make -- warn and let it through.
+            print("[MongoDB] claim_rag_slot error:", err)
+            return True
+
+    with _lock:
+        user = _memory_users.get(owner)
+        if user is None:
+            return False
+        if user.get("ragUsed") is True:
+            return False
+        user["ragUsed"] = True
+        user["ragUsedAt"] = _now()
+        return True
+
+
+def release_rag_slot(email: str) -> None:
+    """Hand a claimed slot back, for an ingest that then failed.
+
+    A Voyage rate limit or an unreachable Atlas is not the user spending their
+    one document -- without this, a failure they did not cause would burn the
+    only allowance they get.
+    """
+    owner = _owner(email)
+    if not owner or is_developer(owner):
+        return
+
+    db = _get_db()
+    if db is not None:
+        try:
+            db.users.update_one({"email": owner}, {"$unset": {"ragUsed": "", "ragUsedAt": ""}})
+            return
+        except Exception as err:
+            print("[MongoDB] release_rag_slot error:", err)
+
+    with _lock:
+        user = _memory_users.get(owner)
+        if user is not None:
+            user.pop("ragUsed", None)
+            user.pop("ragUsedAt", None)
+
+
 def update_user_profile(
     email: str,
     name: Optional[str] = None,
@@ -527,269 +650,3 @@ def list_tool_calls(limit: int = 100) -> List[Dict[str, Any]]:
 
     with _lock:
         return list(reversed(_memory_tool_calls[-limit:]))
-
-
-# --------------------------------------------------------------------------
-# Generated images
-# --------------------------------------------------------------------------
-
-# How long a generated picture is kept. Atlas' free tier is 512MB and a 1024px
-# PNG is over a megabyte, so images cannot be kept the way text turns are: an
-# unbounded gallery would fill the cluster and take the conversations with it.
-# A TTL index does the deleting, so nothing has to sweep. Set 0 to keep forever.
-IMAGE_RETENTION_DAYS = int(os.environ.get("IMAGE_RETENTION_DAYS", "30") or 0)
-
-# The memory fallback holds far fewer, for the same reason at a smaller scale:
-# this is RAM on a 512MB Render instance, not a disk.
-MAX_MEMORY_IMAGES = 20
-
-_memory_images: Dict[str, Dict[str, Any]] = {}
-_image_index_ready = False
-
-
-def _images_collection():
-    """The images collection with its TTL index in place, or None."""
-    global _image_index_ready
-    db = _get_db()
-    if db is None:
-        return None
-
-    if not _image_index_ready:
-        try:
-            db.images.create_index([("user_email", 1), ("created_at", -1)])
-            if IMAGE_RETENTION_DAYS > 0:
-                # Mongo expires on a real date, not the ISO strings used
-                # elsewhere in this file, so `expires_at` is stored separately.
-                db.images.create_index("expires_at", expireAfterSeconds=0)
-            _image_index_ready = True
-        except Exception as err:
-            print("[MongoDB] image index warning:", err)
-
-    return db.images
-
-
-def save_image(
-    data: bytes,
-    mime: str,
-    meta: Dict[str, Any],
-    user_email: Optional[str] = None,
-) -> str:
-    """Store one generated image and return the id it is served under.
-
-    Unlike conversations, a guest's image is stored too -- the id is the only way
-    to render it, and without one the picture the guest just asked for could not
-    be shown at all.
-    """
-    from datetime import timedelta
-
-    image_id = uuid.uuid4().hex[:16]
-    doc: Dict[str, Any] = {
-        "id": image_id,
-        "user_email": _owner(user_email),
-        "mime": mime,
-        "created_at": _now(),
-        **{k: v for k, v in meta.items() if k != "data"},
-    }
-
-    collection = _images_collection()
-    if collection is not None:
-        try:
-            # pyrefly: ignore [missing-import]
-            from bson import Binary
-
-            stored = dict(doc)
-            stored["data"] = Binary(data)
-            if IMAGE_RETENTION_DAYS > 0:
-                stored["expires_at"] = datetime.now(timezone.utc) + timedelta(days=IMAGE_RETENTION_DAYS)
-            collection.insert_one(stored)
-            return image_id
-        except Exception as err:
-            print("[MongoDB] save_image error:", err)
-
-    with _lock:
-        _memory_images[image_id] = {**doc, "data": data}
-        # Oldest out first; dicts keep insertion order.
-        while len(_memory_images) > MAX_MEMORY_IMAGES:
-            _memory_images.pop(next(iter(_memory_images)))
-    return image_id
-
-
-def get_image(image_id: str) -> Optional[Dict[str, Any]]:
-    """The bytes and content type for one image, or None if it is gone."""
-    collection = _images_collection()
-    if collection is not None:
-        try:
-            found = collection.find_one({"id": image_id})
-            if found:
-                return {"data": bytes(found["data"]), "mime": found.get("mime", "image/png")}
-        except Exception as err:
-            print("[MongoDB] get_image error:", err)
-
-    with _lock:
-        found = _memory_images.get(image_id)
-        return {"data": found["data"], "mime": found.get("mime", "image/png")} if found else None
-
-
-def list_images(user_email: Optional[str] = None, limit: int = 24) -> List[Dict[str, Any]]:
-    """Recent generations for one account, newest first, without the bytes."""
-    owner = _owner(user_email)
-    if owner is None:
-        return []
-
-    collection = _images_collection()
-    if collection is not None:
-        try:
-            cursor = (
-                collection.find({"user_email": owner}, {"_id": 0, "data": 0, "expires_at": 0})
-                .sort("created_at", -1)
-                .limit(limit)
-            )
-            return list(cursor)
-        except Exception as err:
-            print("[MongoDB] list_images error:", err)
-
-    with _lock:
-        rows = [
-            {k: v for k, v in doc.items() if k != "data"}
-            for doc in _memory_images.values()
-            if doc.get("user_email") == owner
-        ]
-    return list(reversed(rows))[:limit]
-
-
-# --------------------------------------------------------------------------
-# Generated videos
-# --------------------------------------------------------------------------
-
-# Kept for less time than pictures, and the arithmetic is the reason: a 720p
-# clip is several megabytes where a PNG is one, so the same retention window
-# would fill a 512MB cluster many times faster. Set 0 to keep forever.
-VIDEO_RETENTION_DAYS = int(os.environ.get("VIDEO_RETENTION_DAYS", "14") or 0)
-
-# Far fewer than images in the RAM fallback, for the same reason at a smaller
-# scale -- twenty clips would be most of a small instance's memory.
-MAX_MEMORY_VIDEOS = 4
-
-# One BSON document caps at 16MB, and the bytes are stored inline the way an
-# image is. This stops short of that with room for the metadata, so an oversized
-# clip fails with a sentence someone can act on instead of a driver-level error
-# about document size. A file that trips this is the signal to move to GridFS.
-MAX_VIDEO_BYTES = 15 * 1024 * 1024
-
-_memory_videos: Dict[str, Dict[str, Any]] = {}
-_video_index_ready = False
-
-
-def _videos_collection():
-    """The videos collection with its TTL index in place, or None."""
-    global _video_index_ready
-    db = _get_db()
-    if db is None:
-        return None
-
-    if not _video_index_ready:
-        try:
-            db.videos.create_index([("user_email", 1), ("created_at", -1)])
-            if VIDEO_RETENTION_DAYS > 0:
-                db.videos.create_index("expires_at", expireAfterSeconds=0)
-            _video_index_ready = True
-        except Exception as err:
-            print("[MongoDB] video index warning:", err)
-
-    return db.videos
-
-
-def save_video(
-    data: bytes,
-    mime: str,
-    meta: Dict[str, Any],
-    user_email: Optional[str] = None,
-) -> str:
-    """Store one generated clip and return the id it is served under.
-
-    Raises ValueError when the file is too large to store inline, which the
-    caller turns into a message asking for a lower resolution -- the clip has
-    already been paid for by then, so failing silently would waste it.
-    """
-    from datetime import timedelta
-
-    if len(data) > MAX_VIDEO_BYTES:
-        raise ValueError(
-            "That clip is {:.1f}MB, over the {}MB an inline document can hold. "
-            "Generate it at a lower resolution or a shorter length.".format(
-                len(data) / 1024 / 1024, MAX_VIDEO_BYTES // 1024 // 1024
-            )
-        )
-
-    video_id = uuid.uuid4().hex[:16]
-    doc: Dict[str, Any] = {
-        "id": video_id,
-        "user_email": _owner(user_email),
-        "mime": mime,
-        "created_at": _now(),
-        **{k: v for k, v in meta.items() if k != "data"},
-    }
-
-    collection = _videos_collection()
-    if collection is not None:
-        try:
-            # pyrefly: ignore [missing-import]
-            from bson import Binary
-
-            stored = dict(doc)
-            stored["data"] = Binary(data)
-            if VIDEO_RETENTION_DAYS > 0:
-                stored["expires_at"] = datetime.now(timezone.utc) + timedelta(days=VIDEO_RETENTION_DAYS)
-            collection.insert_one(stored)
-            return video_id
-        except Exception as err:
-            print("[MongoDB] save_video error:", err)
-
-    with _lock:
-        _memory_videos[video_id] = {**doc, "data": data}
-        while len(_memory_videos) > MAX_MEMORY_VIDEOS:
-            _memory_videos.pop(next(iter(_memory_videos)))
-    return video_id
-
-
-def get_video(video_id: str) -> Optional[Dict[str, Any]]:
-    """The bytes and content type for one clip, or None if it is gone."""
-    collection = _videos_collection()
-    if collection is not None:
-        try:
-            found = collection.find_one({"id": video_id})
-            if found:
-                return {"data": bytes(found["data"]), "mime": found.get("mime", "video/mp4")}
-        except Exception as err:
-            print("[MongoDB] get_video error:", err)
-
-    with _lock:
-        found = _memory_videos.get(video_id)
-        return {"data": found["data"], "mime": found.get("mime", "video/mp4")} if found else None
-
-
-def list_videos(user_email: Optional[str] = None, limit: int = 12) -> List[Dict[str, Any]]:
-    """Recent clips for one account, newest first, without the bytes."""
-    owner = _owner(user_email)
-    if owner is None:
-        return []
-
-    collection = _videos_collection()
-    if collection is not None:
-        try:
-            cursor = (
-                collection.find({"user_email": owner}, {"_id": 0, "data": 0, "expires_at": 0})
-                .sort("created_at", -1)
-                .limit(limit)
-            )
-            return list(cursor)
-        except Exception as err:
-            print("[MongoDB] list_videos error:", err)
-
-    with _lock:
-        rows = [
-            {k: v for k, v in doc.items() if k != "data"}
-            for doc in _memory_videos.values()
-            if doc.get("user_email") == owner
-        ]
-    return list(reversed(rows))[:limit]

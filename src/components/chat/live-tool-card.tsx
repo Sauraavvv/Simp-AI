@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Globe, Loader2 } from "lucide-react";
-import { GeneratedImageCard, parseGeneratedImage } from "@/components/chat/generated-image";
-import { GeneratedVideoCard, parseGeneratedVideo } from "@/components/chat/generated-video";
 import type { ToolEvent } from "@/lib/types";
 
 /** What each tool is doing, shown while it runs. */
 const RUNNING_VERB: Record<string, string> = {
   web_search: "Searching the web",
   ask_options: "Preparing options",
-  generate_image: "Generating the image",
-  // Minutes, not seconds -- the verb says so, so the wait does not read as a hang.
-  generate_video: "Rendering the video (this takes a minute)",
+  search_document: "Searching the document",
+  // Can take up to ~20s -- see rag._wait_until_searchable -- so this is worth
+  // naming explicitly rather than falling back to a generic "Working".
+  index_document: "Indexing your document",
 };
 
 /** Cycles "" → "." → ".." → "..." so the label reads as live activity. */
@@ -55,10 +54,6 @@ function errorText(result: string): string {
  * disappears and the answer speaks for itself. Failures stay visible, otherwise
  * the assistant would appear to answer normally after a step silently broke.
  * The full arguments and results of every call are on the Activity page.
- *
- * generate_image and generate_video are the exceptions to "succeeds, then
- * disappears": their result IS the answer, so the picture or clip is rendered
- * here and stays with the stored turn.
  */
 export function LiveToolCard({
   tool,
@@ -89,21 +84,6 @@ export function LiveToolCard({
         <span>{errorText(tool.result!)}</span>
       </p>
     );
-  }
-
-  // The picture or clip is the result -- everything else only reports on itself.
-  //
-  // Video is tested first because a clip's result also carries a `url`, which is
-  // all parseGeneratedImage needs to claim it -- image-first would render an mp4
-  // into an <img> and show a broken picture.
-  const video = parseGeneratedVideo(tool.result);
-  if (video) {
-    return <GeneratedVideoCard video={video} className="max-w-md" />;
-  }
-
-  const image = parseGeneratedImage(tool.result);
-  if (image) {
-    return <GeneratedImageCard image={image} className="max-w-md" />;
   }
 
   if (tool.name === "web_search" && onOpenSources) {

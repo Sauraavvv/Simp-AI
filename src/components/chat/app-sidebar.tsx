@@ -5,15 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AudioLines,
-  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
-  Image as ImageIcon,
+  FileSearch,
   MessageSquare,
   Plus,
   Trash2,
-  Video as VideoIcon,
-  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProfileAvatarMenu } from "@/components/auth/profile-avatar-menu";
@@ -43,6 +40,7 @@ const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Older"];
 /** Main top navigation links in the sidebar. */
 const MAIN_SECTIONS = [
   { href: "/voice", label: "AI Voice Chat", icon: AudioLines },
+  { href: "/documents", label: "Inbuilt RAG", icon: FileSearch },
 ] as const;
 
 function cleanTitle(rawTitle: string): string {
@@ -103,12 +101,6 @@ export function AppSidebar({
   const router = useRouter();
   const onChatPage = pathname === "/";
 
-  const isToolsActive = pathname.startsWith("/tools");
-  const [userToggledTools, setUserToggledTools] = useState<boolean | null>(null);
-
-  // Synchronous state resolution: stays open smoothly on /tools/* routes with zero transition flicker
-  const toolsOpen = userToggledTools !== null ? userToggledTools : isToolsActive;
-
   useEffect(() => {
     setMounted(true);
     setConversations(getStoredConversations());
@@ -144,17 +136,39 @@ export function AppSidebar({
     [],
   );
 
+  // Conversations from /documents/ingest -- listed under the Inbuilt RAG nav
+  // entry instead of Recent Chat, see MAIN_SECTIONS below. No localStorage
+  // cache the way `conversations` gets one: this list is short-lived enough
+  // (opened rarely, next to the nav link that creates it) not to need one.
+  const [ragConversations, setRagConversations] = useState<Conversation[]>([]);
+  const loadRag = useCallback(
+    () =>
+      fetch("/api/conversations?kind=rag", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { conversations?: Conversation[] } | null) => {
+          if (data?.conversations) setRagConversations(data.conversations);
+        })
+        .catch(() => {}),
+    [],
+  );
+
   useEffect(() => {
     if (!signedIn) return;
     load();
+    loadRag();
     window.addEventListener(CONVERSATIONS_CHANGED, load);
-    return () => window.removeEventListener(CONVERSATIONS_CHANGED, load);
-  }, [load, signedIn]);
+    window.addEventListener(CONVERSATIONS_CHANGED, loadRag);
+    return () => {
+      window.removeEventListener(CONVERSATIONS_CHANGED, load);
+      window.removeEventListener(CONVERSATIONS_CHANGED, loadRag);
+    };
+  }, [load, loadRag, signedIn]);
 
   useEffect(() => {
     function onAuthChange() {
       setActiveId(null);
       setConversations([]);
+      setRagConversations([]);
       if (typeof window !== "undefined") {
         localStorage.removeItem(CACHED_CONVERSATIONS_KEY);
       }
@@ -180,12 +194,16 @@ export function AppSidebar({
       const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
       if (res.ok) {
         if (id === activeId) selectThread(null);
+        // Filtering both is harmless -- the id only ever matches one of
+        // them, since a conversation is either "chat" or "rag", never both.
         setConversations((prev) => {
           const next = prev.filter((c) => c.id !== id);
           setStoredConversations(next);
           return next;
         });
+        setRagConversations((prev) => prev.filter((c) => c.id !== id));
         load();
+        loadRag();
         showToast("Conversation deleted successfully", "success");
       } else {
         showToast("Failed to delete conversation", "error");
@@ -279,23 +297,6 @@ export function AppSidebar({
               </Link>
             );
           })}
-
-          <button
-            type="button"
-            onClick={() => {
-              onToggle();
-              setUserToggledTools(true);
-            }}
-            title="All Tools"
-            className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-md px-0 py-2 text-sm transition-colors cursor-pointer select-none",
-              isToolsActive
-                ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
-                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-            )}
-          >
-            <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
-          </button>
         </nav>
       )}
 
@@ -323,85 +324,61 @@ export function AppSidebar({
             {MAIN_SECTIONS.map((section) => {
               const current = pathname === section.href;
               return (
-                <Link
-                  key={section.href}
-                  href={section.href}
-                  onClick={() => onItemClick?.()}
-                  aria-current={current ? "page" : undefined}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
-                    current
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                <div key={section.href}>
+                  <Link
+                    href={section.href}
+                    onClick={() => onItemClick?.()}
+                    aria-current={current ? "page" : undefined}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
+                      current
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                    )}
+                  >
+                    <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
+                    {section.label}
+                  </Link>
+
+                  {/* RAG conversations live here, not in Recent Chat -- see
+                      store.list_conversations' "kind" split. */}
+                  {section.href === "/documents" && ragConversations.length > 0 && (
+                    <div className="pl-3.5 border-l border-sidebar-border/60 ml-4.5 my-1 space-y-0.5">
+                      {ragConversations.map((c) => (
+                        <div
+                          key={c.id}
+                          className={cn(
+                            "group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            c.id === activeId && "bg-sidebar-accent text-primary font-semibold",
+                          )}
+                        >
+                          <FileSearch className="size-3.5 shrink-0 opacity-70" />
+                          <button
+                            onClick={() => selectThread(c.id)}
+                            className="min-w-0 flex-1 truncate text-left cursor-pointer"
+                            title={cleanTitle(c.title)}
+                          >
+                            {cleanTitle(c.title)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              remove(c.id);
+                            }}
+                            className="opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+                            title="Delete conversation"
+                            aria-label={`Delete ${cleanTitle(c.title)}`}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                >
-                  <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
-                  {section.label}
-                </Link>
+                </div>
               );
             })}
-
-            {/* All Tools Accordion Header */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setUserToggledTools(!toolsOpen)}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors cursor-pointer select-none",
-                  isToolsActive
-                    ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
-                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                )}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
-                  <span>All Tools</span>
-                </div>
-                <ChevronDown
-                  className={cn(
-                    "size-3.5 text-muted-foreground/70 transition-transform duration-300 ease-in-out shrink-0",
-                    toolsOpen && "rotate-180 text-primary",
-                  )}
-                />
-              </button>
-
-              {/* Smooth Dropdown Content */}
-              <div
-                className={cn(
-                  "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out pl-3.5 border-l border-sidebar-border/60 ml-4.5 my-1",
-                  toolsOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 overflow-hidden pointer-events-none",
-                )}
-              >
-                <div className="overflow-hidden space-y-0.5 pt-0.5">
-                  <Link
-                    href="/tools/image"
-                    onClick={() => onItemClick?.()}
-                    className={cn(
-                      "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-                      pathname === "/tools/image"
-                        ? "bg-sidebar-accent text-primary font-semibold"
-                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                    )}
-                  >
-                    <ImageIcon className="size-3.5 shrink-0 opacity-70" />
-                    <span>Image Generator</span>
-                  </Link>
-                  <Link
-                    href="/tools/video"
-                    onClick={() => onItemClick?.()}
-                    className={cn(
-                      "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-                      pathname === "/tools/video"
-                        ? "bg-sidebar-accent text-primary font-semibold"
-                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-                    )}
-                  >
-                    <VideoIcon className="size-3.5 shrink-0 opacity-70" />
-                    <span>Video Generator</span>
-                  </Link>
-                </div>
-              </div>
-            </div>
           </nav>
 
           {mounted && !sessionLoading && !signedIn && (

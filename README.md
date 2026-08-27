@@ -140,11 +140,8 @@ touches one file.
 | `server/tools.py` | Tool schemas, implementations, and the registry |
 | `server/store.py` | In-memory conversations and activity |
 | `server/duckduckgo.py` | DuckDuckGo search client |
-| `server/images.py` | Text-to-image provider resolution and generation |
-| `server/video.py` | Text-to-video provider, model limits and generation |
-| `src/app/tools/` | AI Tools hub, Image Generator and Video Generator pages |
-| `src/components/chat/generated-image.tsx` | Renders a generated image in chat or the gallery |
-| `src/components/chat/generated-video.tsx` | Renders a generated clip in chat or the gallery |
+| `server/rag.py` | Document chunking, Voyage embeddings and Atlas vector search |
+| `src/app/tools/` | AI Tools hub |
 
 ## LLM tools
 
@@ -153,8 +150,7 @@ and every call is recorded to the activity log with its duration.
 
 - **`ask_options`** — ask the user to pick from 3 choices before answering (`question`, `options`); the UI renders them as buttons
 - **`web_search`** — search the public web via DuckDuckGo (`query`); returns the single best result, once per message
-- **`generate_image`** — draw a picture from a description (`prompt`, `size`, `style`); the image appears in the turn, once per message
-- **`generate_video`** — render a short clip from a description (`prompt`, `duration`, `aspect`, `style`); the clip appears in the turn, once per message. Offered to the model only when `VIDEO_API_KEY` is set
+- **`search_document`** — search a document indexed for this conversation (`query`); once per message. Offered to the model only when `VOYAGE_API_KEY` is set
 
 While a tool runs the chat shows a one-line status ("Searching the web…"). On
 success the line disappears and only the answer remains — raw arguments and
@@ -366,89 +362,6 @@ constant to get more results back.
 
 If searches start failing, you are being rate-limited; wait a few minutes. For
 heavy use, swap in a keyed search API — only `duckduckgo.py` would change.
-
-### Image generation
-
-Ask for a picture in chat ("draw a fox in tall grass") and the agent calls
-`generate_image`; the image renders in the turn and stays with the saved thread.
-The same tool has its own page under **AI Tools -> Image Generator** in the
-sidebar, with style and shape controls and a gallery of what the account has
-made.
-
-**No setup required.** `server/images.py` resolves its own provider the way
-`llm.py` does, but falls back to a keyless one, so a fresh clone can generate
-without an account:
-
-| Key | Provider | Model |
-| --- | --- | --- |
-| *(none)* | Pollinations | FLUX |
-| `hf_...` | Hugging Face | FLUX.1-schnell |
-| `tgp_v1_...` | Together AI | FLUX.1-schnell-Free |
-| `sk-...` | OpenAI | gpt-image-1 |
-| `AIza...` | Google | gemini-2.5-flash-image |
-
-Set `IMAGE_API_KEY` and the provider follows; `IMAGE_PROVIDER`, `IMAGE_MODEL` and
-`IMAGE_BASE_URL` override it. Groq is absent because it serves no image model,
-which is why this resolves separately from the chat provider.
-
-**Bytes are stored once, never linked.** Every provider hands back an image here,
-which goes into MongoDB and is served from `/api/images/<id>` — so a saved
-conversation still renders after the provider's temporary link has expired, and
-one generation is paid for exactly once. Only the short id travels in the
-conversation document; a base64 data URL would put a megabyte into the stream and
-into every later read of the thread. Images expire after `IMAGE_RETENTION_DAYS`
-(default 30) because a 1024px PNG is over a megabyte and Atlas' free tier is
-512 MB.
-
-**One image per message**, via `ONCE_PER_TURN` in `agent.py` — a model that
-decides its first attempt was not good enough would otherwise spend every
-remaining round redrawing it, on a provider that may bill per call.
-
-### Video generation
-
-Ask for a clip in chat ("animate a paper boat in a rain gutter") and the agent
-calls `generate_video`; the clip renders in the turn and stays with the saved
-thread. It also has its own page under **AI Tools -> Video Generator**, with
-length, orientation and style controls and a gallery of what the account has made.
-
-**This one needs setup, and it is the only tool that does.** Image generation
-falls back to a keyless provider so a fresh clone works; video has no such
-fallback, because no provider gives video away. Every model bills per second of
-output and refuses an unauthenticated request outright — so with `VIDEO_API_KEY`
-unset the page says it is switched off, and the tool is never advertised to the
-model at all (see `is_available` in `tools.py`). A tool the model can see is a
-tool it will try, then apologise for.
-
-**Length is decided by the model you configure, not by the UI.** `video.py`
-reads each model's real limits from the provider's registry and offers only the
-rungs it can actually hit, so changing `VIDEO_MODEL` changes the buttons:
-
-| `VIDEO_MODEL` | Cost | Lengths | Notes |
-| --- | --- | --- | --- |
-| `seedance-pro` *(default)* | $0.025/s | 5s, 10s | Cheapest that still looks good |
-| `p-video` | $0.02/s | 5s, 10s | Cheapest overall |
-| `grok-video-pro` | $0.07/s | 5s, 10s, 15s | Unlocks the 15s rung |
-| `wan` | $0.10/s | 5s, 10s, 15s | 720p with synced audio |
-
-**There is no 20-second option, and that is not a limitation of this code.** No
-model on any provider generates 20 seconds in a single pass — 15s is the ceiling
-almost everywhere, and the one model that goes longer (`nova-reel`, up to two
-minutes) moves in strict multiples of six, so it can give you 18s or 24s but
-never 20. A true 20s clip means generating two and joining them with ffmpeg,
-chaining the last frame of one into the first of the next; that is a real
-feature, not a parameter change, and it doubles both the cost and the wait.
-
-**Clips are stored like images**, in MongoDB and served from `/api/videos/<id>`,
-so only a short id travels in the conversation document. Two differences follow
-from size: `VIDEO_RETENTION_DAYS` defaults to 14 rather than 30, and
-`store.save_video` refuses anything over 15MB rather than letting it fail against
-BSON's 16MB document limit — a clip that trips it is the signal to move this
-collection to GridFS.
-
-**Budget before you enable it.** At the default model a 10s clip costs about
-$0.25 against a Pro plan priced at ₹299 (~$3.40) a month, which is why
-`credits.ts` allows 5 clips a month on Pro and 1 on Free. Those numbers are a
-pricing decision — raising them is not free.
 
 ### The tool loop
 

@@ -11,6 +11,8 @@ export type CurrentUser = {
   credits?: number;
   planActivatedAt?: string;
   planExpiresAt?: string;
+  /** True once this account has spent its one Inbuilt RAG document. */
+  ragUsed?: boolean;
 };
 
 /** Fired whenever the signed-in account changes, including on logout. */

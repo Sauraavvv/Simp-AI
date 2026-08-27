@@ -16,6 +16,7 @@ import { useSession } from "@/lib/auth";
 import { useChat } from "@/lib/useChat";
 import { useSpeech } from "@/lib/useVoice";
 import { buildMessage, splitMessage } from "@/lib/attachments";
+import { GUEST_CHAT_PROMPTS } from "@/lib/limits";
 import { SELECT_CONVERSATION, type Attachment, type Message } from "@/lib/types";
 
 function formatUserError(rawError: string): string {
@@ -212,7 +213,7 @@ function Chat() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const guestPromptsCount = messages.filter((m) => m.role === "user").length;
-  const isGuestLimitReached = !user && guestPromptsCount >= 10;
+  const isGuestLimitReached = !user && guestPromptsCount >= GUEST_CHAT_PROMPTS;
 
   const { enabled: speechEnabled, speak: speechSpeak } = speech;
 
@@ -394,7 +395,7 @@ function Chat() {
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs font-bold font-display uppercase tracking-wider text-primary">
-                    Guest Limit Reached (10/10 Prompts Used)
+                    Guest Limit Reached ({GUEST_CHAT_PROMPTS}/{GUEST_CHAT_PROMPTS} Prompts Used)
                   </p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Create a free account or log in to get <strong>50 free credits</strong>, save your conversation history, and continue chatting.

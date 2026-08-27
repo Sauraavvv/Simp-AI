@@ -7,6 +7,7 @@
  */
 
 import { agentAuth, userHeader } from "@/lib/agent";
+import { GUEST_CHAT_PROMPTS, GUEST_VOICE_TURNS, isDeveloper } from "@/lib/limits";
 import { sessionEmailOr503 } from "@/lib/route-session";
 
 export const runtime = "nodejs";
@@ -29,17 +30,25 @@ export async function POST(req: Request) {
   const session = await sessionEmailOr503();
   if (session.response) return session.response;
 
-  // Guest limit check (max 10 prompts for unauthenticated sessions)
+  // Guest limits. A spoken turn and a typed one arrive on this same route and
+  // are told apart by the `voice` flag useChat already sends -- so the two get
+  // separate, separately-counted allowances rather than sharing one.
+  //
+  // `messages` includes the turn being sent, so `>` rather than `>=` is what
+  // lets a guest actually use their last one.
   if (!session.email && typeof body === "object" && body !== null && "messages" in body) {
-    const rawMessages = (body as { messages?: unknown }).messages;
+    const { messages: rawMessages, voice } = body as { messages?: unknown; voice?: unknown };
     if (Array.isArray(rawMessages)) {
-      const userPromptsCount = rawMessages.filter((m: { role?: string }) => m?.role === "user").length;
-      if (userPromptsCount > 10) {
+      const used = rawMessages.filter((m: { role?: string }) => m?.role === "user").length;
+      const spoken = voice === true;
+      const limit = spoken ? GUEST_VOICE_TURNS : GUEST_CHAT_PROMPTS;
+      if (used > limit) {
         return Response.json(
           {
-            error:
-              "You have reached the guest limit of 10 prompts. Create a free account or log in to receive 50 free credits, save your conversation history, and continue chatting.",
-            code: "GUEST_LIMIT_REACHED",
+            error: spoken
+              ? `You have used all ${GUEST_VOICE_TURNS} free voice turns. Create a free account or log in to keep talking.`
+              : `You have reached the guest limit of ${GUEST_CHAT_PROMPTS} prompts. Create a free account or log in to receive 50 free credits, save your conversation history, and continue chatting.`,
+            code: spoken ? "GUEST_VOICE_LIMIT_REACHED" : "GUEST_LIMIT_REACHED",
           },
           { status: 402 },
         );
@@ -47,8 +56,9 @@ export async function POST(req: Request) {
     }
   }
 
-  // Credit & Plan Enforcement for signed-in users
-  if (session.email) {
+  // Credit & Plan Enforcement for signed-in users. The developer's own account
+  // is exempt -- see isDeveloper.
+  if (session.email && !isDeveloper(session.email)) {
     try {
       const { getDb } = await import("@/lib/mongodb");
       const db = await getDb();
