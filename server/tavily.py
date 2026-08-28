@@ -12,12 +12,36 @@ install on a small Render instance.
 """
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 # pyrefly: ignore [missing-import]
 import httpx
 
 ENDPOINT = "https://api.tavily.com/search"
+
+# Words that mean "as of now" rather than "in general".
+#
+# Tavily's default (general) topic returns undated results, and without a date
+# on each one the model cannot tell a two-year-old article from this morning's
+# -- so it falls back on what it already believes. Asked for "the latest news
+# about the nepal flood" it answered about the September 2024 floods, from a
+# result set that mixed 2000, 2015, 2019, 2024 and 2025, because nothing in the
+# results said which was current.
+#
+# topic="news" fixes both halves: results come back dated and ranked by
+# recency. It is not the default because it *forces* recency -- asked about the
+# 2015 Nepal earthquake it returns this week's headlines instead of the event
+# -- so it is used only when the question is actually about now.
+_TIME_SENSITIVE = re.compile(
+    r"\b(latest|newest|recent|recently|news|headlines?|today|tonight|yesterday"
+    r"|current|currently|now|breaking|update[ds]?|so far|this (?:week|month|year))\b",
+    re.IGNORECASE,
+)
+
+
+def is_time_sensitive(query: str) -> bool:
+    return bool(_TIME_SENSITIVE.search(query or ""))
 
 # Well inside the caller's budget -- see duckduckgo.TOTAL_BUDGET_SECONDS for
 # why the whole search has to fit in one, and what happens when it does not.
@@ -49,19 +73,23 @@ def search(query: str, max_results: int = 5, timeout: Optional[float] = None) ->
     if not key:
         raise TavilyUnavailable("TAVILY_API_KEY is not set.")
 
+    payload: Dict[str, Any] = {
+        "query": query,
+        "max_results": max_results,
+        # Snippets, not whole scraped pages: the model gets one search
+        # per turn and a page of raw content each would crowd out the
+        # conversation for no gain in answerability.
+        "search_depth": "basic",
+        "include_answer": False,
+        "include_raw_content": False,
+    }
+    if is_time_sensitive(query):
+        payload["topic"] = "news"
+
     try:
         response = httpx.post(
             ENDPOINT,
-            json={
-                "query": query,
-                "max_results": max_results,
-                # Snippets, not whole scraped pages: the model gets one search
-                # per turn and a page of raw content each would crowd out the
-                # conversation for no gain in answerability.
-                "search_depth": "basic",
-                "include_answer": False,
-                "include_raw_content": False,
-            },
+            json=payload,
             headers={"Authorization": f"Bearer {key}"},
             timeout=timeout or TIMEOUT_SECONDS,
         )
@@ -76,22 +104,28 @@ def search(query: str, max_results: int = 5, timeout: Optional[float] = None) ->
         raise TavilyUnavailable(f"Tavily returned HTTP {response.status_code}.")
 
     try:
-        payload: Dict[str, Any] = response.json()
+        body: Dict[str, Any] = response.json()
     except ValueError:
         raise TavilyUnavailable("Tavily returned a response that was not JSON.")
 
     results: List[Dict[str, str]] = []
-    for row in payload.get("results", [])[:max_results]:
+    for row in body.get("results", [])[:max_results]:
         url = str(row.get("url") or "").strip()
         if not url:
             continue
-        results.append(
-            {
-                "title": str(row.get("title") or url).strip(),
-                "url": url,
-                # Tavily calls it "content"; the rest of the app calls the same
-                # thing a snippet, and renames here rather than everywhere else.
-                "snippet": str(row.get("content") or "").strip(),
-            }
-        )
+        result = {
+            "title": str(row.get("title") or url).strip(),
+            "url": url,
+            # Tavily calls it "content"; the rest of the app calls the same
+            # thing a snippet, and renames here rather than everywhere else.
+            "snippet": str(row.get("content") or "").strip(),
+        }
+        # Only the news topic returns this. Passing it through is the whole
+        # point of asking for that topic: an undated result set is what let the
+        # model answer a "latest news" question from two-year-old memory,
+        # because nothing in front of it said which article was current.
+        published = str(row.get("published_date") or "").strip()
+        if published:
+            result["published"] = published
+        results.append(result)
     return results

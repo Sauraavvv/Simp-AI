@@ -515,6 +515,32 @@ back to the classic `html` one. No key, no third-party search package;
 Quota is not what decides the order: `web_search` is capped at one call per
 turn, so Tavily's 1,000 free searches a month are 1,000 conversations.
 
+### "Latest" needs dated results, not just fresh ones
+
+Asked for "the latest news about the nepal flood", the agent answered about the
+**September 2024** floods — while the flood in question was three days old.
+
+The search was not the problem; the shape of its results was. Tavily's default
+topic returns snippets with **no publication date**, and that result set mixed
+articles from 2000, 2015, 2019, 2024 and 2025. With nothing in front of it
+saying which was current, the model fell back on what it already believed —
+and for "Nepal flood" what it believes is 2024.
+
+`topic="news"` fixes both halves at once: results come back dated *and* ranked
+by recency. `tavily.py` passes `published_date` through as `published` so the
+date reaches the model, which is the entire point of asking for that topic.
+
+It is not the default, because it **forces** recency: asked about the 2015
+Nepal earthquake with `topic="news"`, Tavily returns this week's headlines
+instead of the event. So `is_time_sensitive()` routes on the query — "latest",
+"news", "today", "current", "update", "breaking" and friends get the news
+topic, everything else gets the general one. Measured 8/8 on a routing set that
+deliberately includes `2015 nepal earthquake death toll` (must **not** be
+treated as news) alongside `nepal flood update` (must be).
+
+DuckDuckGo has no equivalent, which is one more reason it is the fallback
+rather than the primary.
+
 ### The whole search must fit in one budget
 
 `duckduckgo.py` enforces a wall-clock `TOTAL_BUDGET_SECONDS` (20s) across every
