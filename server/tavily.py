@@ -20,19 +20,26 @@ import httpx
 
 ENDPOINT = "https://api.tavily.com/search"
 
-# Words that mean "as of now" rather than "in general".
+# A backstop, not the decision. The `recent` argument -- set by the model from
+# the web_search schema -- is what normally decides; this only runs when the
+# model left it unset.
 #
-# Tavily's default (general) topic returns undated results, and without a date
-# on each one the model cannot tell a two-year-old article from this morning's
-# -- so it falls back on what it already believes. Asked for "the latest news
-# about the nepal flood" it answered about the September 2024 floods, from a
-# result set that mixed 2000, 2015, 2019, 2024 and 2025, because nothing in the
-# results said which was current.
+# It is deliberately not the primary, because a keyword list only ever covers
+# the phrasings someone thought to add. This one is English-only and misses
+# every realistic non-English way of asking the same thing: "nepal flood ki
+# taaza khabar", "नेपाल बाढ़ की ताज़ा खबर", "abhi kya ho raha hai" -- and
+# plenty of English ones too, like "who won the match". The model read the
+# question and can tell; a regex cannot be grown to keep up.
 #
-# topic="news" fixes both halves: results come back dated and ranked by
-# recency. It is not the default because it *forces* recency -- asked about the
-# 2015 Nepal earthquake it returns this week's headlines instead of the event
-# -- so it is used only when the question is actually about now.
+# What it is guarding against: Tavily's default topic returns undated results,
+# and without a date the model cannot tell a two-year-old article from this
+# morning's, so it falls back on what it already believes. Asked for "the
+# latest news about the nepal flood" it answered about the September 2024
+# floods, from a result set mixing 2000, 2015, 2019, 2024 and 2025.
+#
+# topic="news" fixes both halves: dated results, ranked by recency. It is not
+# unconditional because it *forces* recency -- asked about the 2015 Nepal
+# earthquake it returns this week's headlines instead of the event.
 _TIME_SENSITIVE = re.compile(
     r"\b(latest|newest|recent|recently|news|headlines?|today|tonight|yesterday"
     r"|current|currently|now|breaking|update[ds]?|so far|this (?:week|month|year))\b",
@@ -62,7 +69,12 @@ class TavilyUnavailable(RuntimeError):
     """Tavily refused or could not be reached (bad key, quota, network)."""
 
 
-def search(query: str, max_results: int = 5, timeout: Optional[float] = None) -> List[Dict[str, str]]:
+def search(
+    query: str,
+    max_results: int = 5,
+    timeout: Optional[float] = None,
+    recent: Optional[bool] = None,
+) -> List[Dict[str, str]]:
     """Return [{title, url, snippet}] -- the same shape duckduckgo.search does.
 
     Mapping the response here rather than at the call site is what lets
@@ -83,7 +95,8 @@ def search(query: str, max_results: int = 5, timeout: Optional[float] = None) ->
         "include_answer": False,
         "include_raw_content": False,
     }
-    if is_time_sensitive(query):
+    # The model's judgement first; the keyword check only when it said nothing.
+    if recent if recent is not None else is_time_sensitive(query):
         payload["topic"] = "news"
 
     try:

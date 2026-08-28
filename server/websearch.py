@@ -22,7 +22,7 @@ call per turn (ONCE_PER_TURN in agent.py), so Tavily's 1,000 free searches a
 month are 1,000 conversations, not 1,000 requests.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import duckduckgo
 import tavily
@@ -37,11 +37,21 @@ def provider() -> str:
     return "tavily.com" if tavily.available() else "duckduckgo.com"
 
 
-def search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
-    """Search the web. Raises SearchUnavailable if every provider fails."""
+def search(
+    query: str, max_results: int = 5, recent: Optional[bool] = None
+) -> List[Dict[str, str]]:
+    """Search the web. Raises SearchUnavailable if every provider fails.
+
+    `recent` asks for dated, recency-ranked results. It comes from the model
+    (see the `recent` parameter on the web_search schema) because the model
+    read the question and can tell "aaj ki khabar" from "what is a decorator"
+    in any language, where a keyword list only ever covers the phrasings
+    someone thought to add. None means it did not say, and tavily.py then
+    falls back to its own keyword check rather than guessing "no".
+    """
     if tavily.available():
         try:
-            results = tavily.search(query, max_results)
+            results = tavily.search(query, max_results, recent=recent)
             if results:
                 return results
             # A key that works but found nothing is a real no-match, not a

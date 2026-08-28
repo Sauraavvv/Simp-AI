@@ -7,7 +7,7 @@ so nothing in the UI needs changing.
 """
 
 import json
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import rag
 import store
@@ -31,14 +31,25 @@ import websearch
 MAX_WEB_RESULTS = 5
 
 
-def web_search(query: str, max_results: int = MAX_WEB_RESULTS) -> Dict[str, Any]:
-    """Search the public web -- see websearch.py for which provider runs."""
+def web_search(
+    query: str,
+    max_results: int = MAX_WEB_RESULTS,
+    recent: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Search the public web -- see websearch.py for which provider runs.
+
+    `recent` is the model's own judgement of whether the question is about now,
+    and it is the model's to make: it read the question, in whatever language
+    it was asked, and already decided the search was needed at all. The
+    keyword fallback behind this (tavily.is_time_sensitive) only applies when
+    the model leaves it unset -- see websearch.search.
+    """
     query = str(query or "").strip()
     if not query:
         raise ValueError("A search query is required")
 
     limit = max(1, min(int(max_results), MAX_WEB_RESULTS))
-    results = websearch.search(query, limit)
+    results = websearch.search(query, limit, recent=recent)
 
     return {
         "query": query,
@@ -203,6 +214,21 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                         "query": {
                             "type": "string",
                             "description": "The search query, phrased as you would type it into a search box.",
+                        },
+                        "recent": {
+                            "type": "boolean",
+                            "description": (
+                                "True when the answer depends on what is happening now "
+                                "rather than on established fact -- news, an unfolding "
+                                "event, a live score, today's price, who currently holds "
+                                "a post. This switches the search to recent, dated "
+                                "articles, so without it you cannot tell a two-year-old "
+                                "result from this morning's. False for anything "
+                                "settled: history, definitions, documentation, how "
+                                "something works, or a past event with a date in the "
+                                "question. Judge it from the user's question in "
+                                "whatever language they asked it."
+                            ),
                         },
                     },
                     "required": ["query"],

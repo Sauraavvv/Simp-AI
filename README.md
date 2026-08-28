@@ -527,19 +527,34 @@ saying which was current, the model fell back on what it already believed —
 and for "Nepal flood" what it believes is 2024.
 
 `topic="news"` fixes both halves at once: results come back dated *and* ranked
-by recency. `tavily.py` passes `published_date` through as `published` so the
-date reaches the model, which is the entire point of asking for that topic.
+by recency, and `published_date` is passed through as `published` so the date
+reaches the model. It is not unconditional, because news **forces** recency:
+asked about the 2015 Nepal earthquake with `topic="news"`, Tavily returns this
+week's headlines instead of the event.
 
-It is not the default, because it **forces** recency: asked about the 2015
-Nepal earthquake with `topic="news"`, Tavily returns this week's headlines
-instead of the event. So `is_time_sensitive()` routes on the query — "latest",
-"news", "today", "current", "update", "breaking" and friends get the news
-topic, everything else gets the general one. Measured 8/8 on a routing set that
-deliberately includes `2015 nepal earthquake death toll` (must **not** be
-treated as news) alongside `nepal flood update` (must be).
+**The model decides, not a keyword list.** `web_search` takes a `recent`
+boolean and the schema explains when to set it; the model already read the
+question and already decided a search was needed at all. The first attempt here
+*was* a regex — `latest|news|today|current|...` — and it is kept only as a
+backstop for when the model says nothing, because it does not scale and cannot
+be grown to:
 
-DuckDuckGo has no equivalent, which is one more reason it is the fallback
-rather than the primary.
+| Query | Regex | Model |
+| --- | --- | --- |
+| `nepal flood ki taaza khabar batao` | ✗ | `recent: true` |
+| `नेपाल बाढ़ की ताज़ा खबर क्या है?` | ✗ | `recent: true` |
+| `abhi nepal me kya ho raha hai` | ✗ | `recent: true` |
+| `aaj sensex kitna hai` | ✗ | `recent: true` |
+| `who won the last cricket match` | ✗ | `recent: true` |
+| `How many died in the 2015 Nepal earthquake?` | ✗ | `recent: false` |
+
+The regex found **0 of 7** on that set — it is English-only, and the app is
+not. Every Hindi, Hinglish and keyword-free English phrasing slipped past it,
+which is the general shape of the problem: a word list only ever covers the
+phrasings someone thought to add.
+
+DuckDuckGo has no dated-results equivalent, which is one more reason it is the
+fallback rather than the primary.
 
 ### The whole search must fit in one budget
 
