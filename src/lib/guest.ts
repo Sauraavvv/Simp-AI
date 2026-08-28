@@ -1,24 +1,37 @@
 /**
  * Guest allowances that survive a refresh.
  *
- * The first version of this counted the user messages in the request body,
- * which does not hold: the body is what the browser sends, so reloading the
- * page sends a fresh, empty history and the count starts again. Both the
- * browser check and the route check read the same client-supplied number, so
- * "enforced twice" was really enforced once, on the honour system.
+ * The first version counted the user messages in the request body, which does
+ * not hold: the body is what the browser sends, so reloading sent a fresh,
+ * empty history and the count started again.
  *
- * The count lives here instead -- server-side, in Mongo, keyed on an httpOnly
- * cookie the browser cannot read or edit. A reload now keeps the tally.
+ * The second version moved the count into Mongo, keyed on an httpOnly cookie.
+ * That fixed the refresh but bought nothing the cookie did not already give,
+ * and cost a great deal: a guest turn touches the database nowhere else -- there
+ * is no session to look up -- so it put a cold Atlas round trip in front of
+ * every turn. Measured in production: 0.25s warm, 2.9s cold, all of it before
+ * the agent had even been asked. In a voice call that silence is the whole of
+ * what "slow" feels like.
  *
- * This is a nudge to sign up, not a security boundary, and it is worth being
- * plain about the difference: a private window or cleared site data starts a
- * new guest, and nothing short of demanding an account can prevent that.
- * Stopping a refresh from resetting the count is the whole goal.
+ * The count lives in the cookie itself now, httpOnly so page scripts cannot
+ * touch it and signed with HMAC-SHA256 so a hand-edited one is not mistaken for
+ * a real tally.
+ *
+ * Be clear about what that signature is and is not worth. An unreadable
+ * signature means "start over", so editing the cookie gets someone a fresh
+ * allowance -- but so does deleting it, and so did deleting the id the database
+ * row was found by. Neither design can tell a tampered guest from a genuinely
+ * new one, because the identifier is held by the client in both. The signature
+ * buys tidiness, not security, and the database bought neither.
+ *
+ * So: this is a nudge to sign up, not a security boundary. A private window or
+ * cleared site data starts a new guest and nothing short of demanding an
+ * account can prevent that. Stopping a *refresh* from resetting the count is
+ * the whole goal, and that it does.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { getDb } from "@/lib/mongodb";
 import { GUEST_CHAT_PROMPTS, GUEST_VOICE_TURNS } from "@/lib/limits";
 
 export const GUEST_COOKIE = "simp_guest";
@@ -27,8 +40,6 @@ export const GUEST_COOKIE = "simp_guest";
  *  Matches the session cookie, so a guest and an account age out together. */
 const GUEST_DAYS = 30;
 
-const COLLECTION = "guest_usage";
-
 type Kind = "chat" | "voice";
 
 const LIMIT: Record<Kind, number> = {
@@ -36,47 +47,52 @@ const LIMIT: Record<Kind, number> = {
   voice: GUEST_VOICE_TURNS,
 };
 
-let indexed: Promise<void> | null = null;
+/**
+ * The HMAC key. AGENT_TOKEN is the fallback because it is already required in
+ * production and already secret, so this needs no new configuration to be
+ * unforgeable there. Rotating either one resets every guest's allowance, which
+ * is a fine thing to happen to a nudge.
+ */
+function secret(): string {
+  return (process.env.GUEST_SECRET || process.env.AGENT_TOKEN || "").trim();
+}
 
-async function collection() {
-  const db = await getDb();
-  // Mongo expires the rows on `expiresAt`, so nothing has to sweep them.
-  indexed ??= db
-    .collection(COLLECTION)
-    .createIndexes([
-      { key: { id: 1 }, unique: true },
-      { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
-    ])
-    .then(() => undefined)
-    .catch((err) => {
-      indexed = null; // let a later request try again
-      throw err;
-    });
-  await indexed;
-  return db.collection(COLLECTION);
+type Tally = { chat: number; voice: number; exp: number };
+
+const EMPTY: Tally = { chat: 0, voice: 0, exp: 0 };
+
+function sign(payload: string): string {
+  return createHmac("sha256", secret()).update(payload).digest("base64url");
+}
+
+function encode(t: Tally): string {
+  const payload = `${t.chat}.${t.voice}.${t.exp}`;
+  return `${payload}.${sign(payload)}`;
 }
 
 /**
- * This browser's guest id, minting one if it has none.
- *
- * httpOnly so page scripts cannot read or forge it, and `lax` so it survives
- * ordinary navigation. Set here rather than in middleware because this is the
- * only place that needs it, and a guest who never chats never gets a cookie.
+ * Read a tally back, or null if it was tampered with, truncated or has expired.
+ * A null here means "start over", never "let them through": the caller charges
+ * from zero, which is the same thing a brand new browser gets.
  */
-async function guestId(): Promise<string> {
-  const jar = await cookies();
-  const existing = jar.get(GUEST_COOKIE)?.value;
-  if (existing) return existing;
+function decode(raw: string | undefined): Tally | null {
+  if (!raw) return null;
 
-  const id = randomBytes(16).toString("hex");
-  jar.set(GUEST_COOKIE, id, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: new Date(Date.now() + GUEST_DAYS * 86_400_000),
-  });
-  return id;
+  const cut = raw.lastIndexOf(".");
+  if (cut < 0) return null;
+
+  const payload = raw.slice(0, cut);
+  const mac = Buffer.from(raw.slice(cut + 1));
+  const want = Buffer.from(sign(payload));
+  // timingSafeEqual throws on a length mismatch, so that is checked first --
+  // and a wrong length is already a wrong signature.
+  if (mac.length !== want.length || !timingSafeEqual(mac, want)) return null;
+
+  const [chat, voice, exp] = payload.split(".").map(Number);
+  if (![chat, voice, exp].every(Number.isFinite)) return null;
+  if (exp <= Date.now()) return null;
+
+  return { chat, voice, exp };
 }
 
 export type GuestCharge = {
@@ -87,6 +103,16 @@ export type GuestCharge = {
   limit: number;
 };
 
+async function write(jar: Awaited<ReturnType<typeof cookies>>, next: Tally) {
+  jar.set(GUEST_COOKIE, encode(next), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    expires: new Date(next.exp),
+  });
+}
+
 /**
  * Count one guest turn and say whether it was within the allowance.
  *
@@ -94,34 +120,29 @@ export type GuestCharge = {
  * allowances -- a spoken turn costs a round trip plus speech synthesis where a
  * typed one costs only the former.
  *
- * One atomic findOneAndUpdate rather than a read then a write: two turns sent
- * at once would otherwise both read the old count and both be allowed.
- *
- * A database that cannot be reached allows the turn. Metering is not worth
- * taking chat down for, which is the same call `chargeCredit` makes for
- * signed-in users.
+ * Two turns sent at the same instant would both read the same cookie and the
+ * second would overwrite the first, so a guest could get one extra turn that
+ * way. The UI sends turns one at a time and this is a nudge, not a gate, so
+ * that is a fair trade for taking a database off the path -- but it is a real
+ * difference from the atomic update this replaced, not an oversight.
  */
 export async function chargeGuestTurn(kind: Kind): Promise<GuestCharge> {
   const limit = LIMIT[kind];
 
   try {
-    const id = await guestId();
-    const rows = await collection();
-    const field = kind === "voice" ? "voice" : "chat";
+    const jar = await cookies();
+    const current = decode(jar.get(GUEST_COOKIE)?.value) ?? EMPTY;
 
-    const row = await rows.findOneAndUpdate(
-      { id },
-      {
-        $inc: { [field]: 1 },
-        $set: { expiresAt: new Date(Date.now() + GUEST_DAYS * 86_400_000) },
-        $setOnInsert: { id, createdAt: new Date() },
-      },
-      { upsert: true, returnDocument: "after" },
-    );
+    // Capped so a guest who keeps trying does not grow the number forever;
+    // one past the limit is all that has to be remembered to keep refusing.
+    const used = Math.min(current[kind] + 1, limit + 1);
+    await write(jar, { ...current, [kind]: used, exp: Date.now() + GUEST_DAYS * 86_400_000 });
 
-    const used = typeof row?.[field] === "number" ? (row[field] as number) : 1;
     return { allowed: used <= limit, used, limit };
   } catch (err) {
+    // Only reachable if the cookie store itself is unavailable. Metering is not
+    // worth taking chat down for, the same call chargeCredit makes for
+    // signed-in users.
     console.warn("[guest] usage check warning:", err);
     return { allowed: true, used: 0, limit };
   }
@@ -132,13 +153,7 @@ export async function guestUsage(kind: Kind): Promise<GuestCharge> {
   const limit = LIMIT[kind];
   try {
     const jar = await cookies();
-    const id = jar.get(GUEST_COOKIE)?.value;
-    if (!id) return { allowed: true, used: 0, limit };
-
-    const rows = await collection();
-    const row = await rows.findOne({ id });
-    const field = kind === "voice" ? "voice" : "chat";
-    const used = typeof row?.[field] === "number" ? (row[field] as number) : 0;
+    const used = (decode(jar.get(GUEST_COOKIE)?.value) ?? EMPTY)[kind];
     return { allowed: used < limit, used, limit };
   } catch (err) {
     console.warn("[guest] usage read warning:", err);

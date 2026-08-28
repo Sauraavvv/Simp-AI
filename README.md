@@ -89,18 +89,31 @@ The guest numbers live in `src/lib/limits.ts`. Voice and chat share
 `/api/chat` and are told apart by the `voice` flag, so the two allowances are
 counted separately.
 
-**The count is server-side, keyed on an httpOnly cookie** (`src/lib/guest.ts`).
-The first version counted the user messages in the request body and did not
-hold: that body is whatever the browser sends, so reloading the page sent a
-fresh, empty history and the allowance reset. Both the browser check and the
-route check read the same client-supplied number, which made "enforced twice"
-really enforced once, on the honour system. The tally lives in Mongo now, with
-a 30-day TTL, and `/api/guest` is what the pages seed their own count from so
-the banner still appears at the right time after a reload.
+**The count lives in a signed, httpOnly cookie** (`src/lib/guest.ts`), and
+`/api/guest` is what the pages seed their own count from so the banner appears
+at the right time after a reload.
 
-It is a nudge to sign up, not a security boundary: a private window or cleared
-site data starts a new guest, and nothing short of requiring an account
-prevents that. Stopping a refresh from resetting the count is the goal.
+It got there in three steps, and the middle one is worth recording. The first
+version counted the user messages in the request body, which does not hold:
+that body is whatever the browser sends, so reloading sent a fresh, empty
+history and the allowance reset. The second moved the tally into Mongo — which
+fixed the refresh but cost far more than it looked. A guest turn touches the
+database nowhere else (there is no session to look up), so it put a cold Atlas
+round trip in front of every turn: **measured in production at 0.25s warm and
+2.9s cold**, before the agent had even been asked. In a voice call, where
+nothing is spoken until the whole reply is in, that silence is the entire
+experience of "slow".
+
+So the tally moved into the cookie, HMAC-SHA256 signed with `GUEST_SECRET`
+(falling back to `AGENT_TOKEN`). Same refresh-proofing, no network.
+
+It is a nudge to sign up, not a security boundary, and the signature does not
+change that: an unverifiable cookie means "start over", so editing it yields a
+fresh allowance — but so does deleting it, and so did deleting the id the Mongo
+row was keyed by. Neither design can tell a tampered guest from a new one,
+because the client holds the identifier either way. A private window or cleared
+site data starts a new guest. Stopping a *refresh* from resetting the count is
+the goal, and that it does.
 
 `DEVELOPER_EMAILS` (comma-separated) lists accounts exempt from all of it.
 Mirrored on both sides: `store.is_developer` in Python, `isDeveloper` in
@@ -122,8 +135,10 @@ unsaved window.
 | `users` | Accounts, plans, credits, the one-RAG flag |
 | `sessions` | Session cookies, TTL-expired by Mongo |
 | `document_chunks` | RAG chunks and their vectors |
-| `guest_usage` | Signed-out allowances, TTL-expired after 30 days |
 | `tool_calls` | The tool-call log |
+
+A `guest_usage` collection may still exist from the Mongo-backed version of the
+guest tally described above. Nothing reads it, and its rows expire on their own.
 
 `kind` is what separates the sidebar's two lists. It is queried with `$ne:
 "rag"` rather than `== "chat"`, so conversations stored before the field

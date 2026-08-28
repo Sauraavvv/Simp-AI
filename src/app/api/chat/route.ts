@@ -39,6 +39,10 @@ export async function POST(req: Request) {
   // body: that history is whatever the browser chose to send, so a reload sent
   // an empty one and handed the guest a fresh allowance every time. See
   // lib/guest.ts.
+  //
+  // The tally is in the cookie, so this is signature arithmetic and no network:
+  // it was a cold Atlas round trip in front of every guest turn until the count
+  // moved off the database. See lib/guest.ts.
   if (!session.email) {
     const spoken = (body as { voice?: unknown } | null)?.voice === true;
     const charge = await chargeGuestTurn(spoken ? "voice" : "chat");
