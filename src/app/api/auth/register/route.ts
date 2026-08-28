@@ -7,15 +7,19 @@ const FREE_PLAN_CREDITS = 50;
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
-  if (!body || !body.email || !body.password_hash) {
+  if (!body || !body.name || !body.email || !body.password_hash) {
     return NextResponse.json(
-      { error: "Email and password are required." },
+      { error: "Name, email, and password are required." },
       { status: 400 },
     );
   }
 
+  const name = String(body.name).trim();
   const normalizedEmail = String(body.email).trim().toLowerCase();
   const passwordHash = String(body.password_hash);
+  if (!name) {
+    return NextResponse.json({ error: "Please enter your name." }, { status: 400 });
+  }
 
   // The account only exists once it is in the database. There is deliberately
   // no in-memory fallback here: one used to report "registered successfully"
@@ -47,6 +51,7 @@ export async function POST(req: Request) {
     const createdAt = new Date().toISOString();
     await users.insertOne({
       email: normalizedEmail,
+      name,
       password_hash: passwordHash,
       createdAt,
       plan: "free",
@@ -59,7 +64,7 @@ export async function POST(req: Request) {
     console.log("[Auth Register] Stored account in MongoDB:", normalizedEmail);
     return NextResponse.json({
       status: "ok",
-      user: { email: normalizedEmail, name: "", avatar: "", avatarImage: "" },
+      user: { email: normalizedEmail, name, avatar: "", avatarImage: "" },
     });
   } catch (err) {
     console.error("[Auth Register] Write failed:", err);

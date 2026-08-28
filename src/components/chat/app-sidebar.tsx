@@ -257,18 +257,18 @@ export function AppSidebar({
         )}
       </div>
 
-      {mounted && !sessionLoading && signedIn && collapsed && (
+      {mounted && !sessionLoading && collapsed && (
         <div className="px-3 pb-2">
           <Button
             variant="secondary"
             onClick={() => selectThread(null)}
             className={cn(
               "w-full justify-center gap-2 border px-0 text-sm cursor-pointer transition-colors",
-              activeId === null
+              onChatPage && activeId === null
                 ? "border-primary/40 bg-sidebar-accent text-sidebar-accent-foreground"
                 : "border-border bg-elevated/70 hover:bg-elevated",
             )}
-            title="New Conversation"
+            title={signedIn ? "New Conversation" : "New Chat"}
           >
             <Plus className="size-4 text-primary" />
           </Button>
@@ -302,20 +302,20 @@ export function AppSidebar({
 
       {!collapsed && (
         <div className="mx-3 mt-1 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-sidebar-border bg-elevated/40">
-          {mounted && !sessionLoading && signedIn && (
+          {mounted && !sessionLoading && (
             <div className="shrink-0 border-b border-sidebar-border/60 p-2">
               <Button
                 variant="secondary"
                 onClick={() => selectThread(null)}
                 className={cn(
                   "w-full justify-start gap-2 border-0 text-sm cursor-pointer transition-colors",
-                  activeId === null
+                  onChatPage && activeId === null
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold hover:bg-sidebar-accent"
                     : "bg-sidebar hover:bg-sidebar-accent",
                 )}
               >
                 <Plus className="size-4 text-primary" />
-                New Conversation
+                {signedIn ? "New Conversation" : "New Chat"}
               </Button>
             </div>
           )}

@@ -16,8 +16,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { refreshCurrentUser } from "@/lib/auth";
+import { useTheme } from "@/lib/theme";
 
 export async function registerUser(
+  name: string,
   email: string,
   password_hash: string,
 ): Promise<{ success: boolean; error?: string }> {
@@ -27,7 +29,7 @@ export async function registerUser(
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: normalizedEmail, password_hash }),
+      body: JSON.stringify({ name: name.trim(), email: normalizedEmail, password_hash }),
     });
 
     const data = await res.json().catch(() => null);
@@ -105,7 +107,9 @@ export function AuthModal({
   onClose: () => void;
   initialTab?: "login" | "register";
 }) {
+  const { resolvedTheme } = useTheme();
   const [tab, setTab] = useState<"login" | "register">(initialTab);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -161,7 +165,7 @@ export function AuthModal({
       // which left the button narrower than the form fields around it.
       const width = Math.min(400, googleBtnRef.current.offsetWidth || 360);
       google.accounts.id.renderButton(googleBtnRef.current, {
-        theme: "outline",
+        theme: resolvedTheme === "dark" ? "filled_black" : "outline",
         size: "large",
         width,
         text: "continue_with",
@@ -173,7 +177,7 @@ export function AuthModal({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, resolvedTheme]);
 
   if (!open) return null;
 
@@ -193,6 +197,11 @@ export function AuthModal({
     }
 
     if (tab === "register") {
+      if (!name.trim()) {
+        setError("Please enter your name.");
+        return;
+      }
+
       if (!isPasswordStrong) {
         setError("Please satisfy all password safety requirements before registering.");
         return;
@@ -212,9 +221,10 @@ export function AuthModal({
     setIsSubmitting(true);
     try {
       if (tab === "register") {
-        const res = await registerUser(email, password);
+        const res = await registerUser(name, email, password);
         if (res.success) {
           showToast("Account created successfully! Welcome to SIMP AI.", "success");
+          setName("");
           setEmail("");
           setPassword("");
           setConfirmPassword("");
@@ -317,6 +327,25 @@ export function AuthModal({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {tab === "register" && (
+            <div className="space-y-1.5 animate-in fade-in duration-200">
+              <label className="text-[11.5px] font-medium text-muted-foreground">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  disabled={isSubmitting}
+                  required
+                  autoComplete="name"
+                  className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Email Field */}
           <div className="space-y-1.5">
             <label className="text-[11.5px] font-medium text-muted-foreground">
@@ -364,7 +393,7 @@ export function AuthModal({
             </div>
           </div>
 
-          {/* Registration Extra Fields: Confirm Password & Password Checklist */}
+          {/* Registration-only confirmation field */}
           {tab === "register" && (
             <>
               {/* Confirm Password Field */}
@@ -396,29 +425,6 @@ export function AuthModal({
                       <Eye className="size-4" />
                     )}
                   </button>
-                </div>
-              </div>
-
-              {/* Password Safety Live Checklist */}
-              <div className="rounded-xl border border-border bg-elevated/40 p-3 space-y-1.5 text-[11.5px] animate-in fade-in duration-200">
-                <p className="font-medium text-muted-foreground text-[11px] uppercase tracking-wider mb-1">
-                  Password Requirements:
-                </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div
-                    className={`flex items-center gap-1.5 transition-colors ${
-                      hasMinLength ? "text-emerald-500 font-medium" : "text-muted-foreground"
-                    }`}
-                  >
-                    <span>{hasMinLength ? "✓" : "✗"}</span> At least 8 characters
-                  </div>
-                  <div
-                    className={`flex items-center gap-1.5 transition-colors ${
-                      hasUpper ? "text-emerald-500 font-medium" : "text-muted-foreground"
-                    }`}
-                  >
-                    <span>{hasUpper ? "✓" : "✗"}</span> 1 Uppercase (A-Z)
-                  </div>
                 </div>
               </div>
             </>

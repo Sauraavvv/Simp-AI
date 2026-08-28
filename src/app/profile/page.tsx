@@ -251,9 +251,9 @@ export default function ProfilePage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8 items-start">
-          <div className="space-y-4 sm:space-y-6 lg:col-span-1">
-            <div className="rounded-3xl border border-border bg-surface/80 p-4 sm:p-6 shadow-xl backdrop-blur-md space-y-4 sm:space-y-6 text-center">
+        <div className="grid grid-cols-1 gap-4 sm:gap-8 lg:grid-cols-3 lg:items-stretch">
+          <div className="space-y-4 sm:space-y-6 lg:col-span-1 lg:self-stretch">
+            <div className="rounded-3xl border border-border bg-surface/80 p-4 sm:p-6 shadow-xl backdrop-blur-md space-y-4 sm:space-y-6 text-center lg:h-full">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">
                 Profile Image
               </p>
@@ -455,29 +455,30 @@ export default function ProfilePage() {
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                asChild
-                className="py-2 sm:py-2.5 px-4 sm:px-6 text-xs font-medium cursor-pointer"
-              >
-                <Link href="/">Cancel</Link>
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!isChanged || isSubmitting}
-                className={`py-2 sm:py-2.5 px-5 sm:px-7 text-xs font-medium transition-all ${
-                  !isChanged || isSubmitting
-                    ? "opacity-50 cursor-not-allowed"
-                    : "cursor-pointer shadow-md shadow-primary/20 hover:scale-105"
-                }`}
-              >
-                {isSubmitting ? "Saving..." : "Save Profile"}
-              </Button>
-            </div>
           </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-end gap-3 sm:mt-6">
+          <Button
+            type="button"
+            variant="outline"
+            asChild
+            className="py-2 sm:py-2.5 px-4 sm:px-6 text-xs font-medium cursor-pointer"
+          >
+            <Link href="/">Cancel</Link>
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!isChanged || isSubmitting}
+            className={`py-2 sm:py-2.5 px-5 sm:px-7 text-xs font-medium transition-all ${
+              !isChanged || isSubmitting
+                ? "opacity-50 cursor-not-allowed"
+                : "cursor-pointer shadow-md shadow-primary/20 hover:scale-105"
+            }`}
+          >
+            {isSubmitting ? "Saving..." : "Save Profile"}
+          </Button>
         </div>
       </main>
     </div>

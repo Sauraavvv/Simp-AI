@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   CheckCircle2,
-  FileSearch,
   Loader2,
   Paperclip,
   Sparkles,
@@ -39,9 +38,6 @@ function RagGuide({ onStart }: { onStart: () => void }) {
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-4 py-8 gap-6 animate-in fade-in zoom-in-95 duration-300">
       <div className="text-center space-y-1.5">
-        <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30 shadow-xs">
-          <FileSearch className="size-6" />
-        </div>
         <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">
           Inbuilt RAG
         </h1>
@@ -263,11 +259,8 @@ function DocumentIndexer() {
   }
 
   return (
-    <div className="flex w-full flex-1 flex-col items-center px-4 py-8 gap-5 animate-in fade-in zoom-in-95 duration-300">
+    <div className="flex w-full flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8 gap-5 animate-in fade-in zoom-in-95 duration-300">
       <div className="text-center space-y-1.5">
-        <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30 shadow-xs">
-          <FileSearch className="size-6" />
-        </div>
         <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">
           Index a Document
         </h1>
