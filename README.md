@@ -1,35 +1,48 @@
 # SIMP AI
 
-An AI data assistant: a Next.js UI talking to a **Python** agent that runs Groq
-with LLM tool calling.
+An AI chat assistant: a Next.js UI talking to a **Python** agent that runs an
+OpenAI-compatible LLM with tool calling.
 
 ```
 browser ──▶ Next.js /api/* (proxy) ──▶ FastAPI :8000 ──▶ Groq + tools
-                                            │
-                                            └── store.py (in-memory)
+              │                             │
+              └── auth, sessions,           └── store.py ──▶ MongoDB Atlas
+                  credits (MongoDB)             rag.py   ──▶ Voyage + Atlas Vector Search
 ```
 
-The Python service owns all model logic and all state. The Next routes are thin
-proxies, so the browser only talks to its own origin and `GROQ_API_KEY` never
-reaches the client.
+The Python service owns all model logic and all conversation state. The Next
+routes are thin proxies, so the browser only ever talks to its own origin and
+no provider key reaches the client. The one thing Next owns directly is
+accounts — sessions, plans and credits are read from MongoDB in the route
+itself, because they gate the proxy call rather than travelling through it.
 
-**There is no mock data.** Every list in the UI — conversations, activity, tools,
-permissions — is real data produced by the running system.
+**There is no mock data.** Every list in the UI — conversations, tools, RAG
+documents — is real data produced by the running system.
 
 ## Setup
 
-1. Put your Groq key in `.env.local` (both sides read this one file):
+1. Copy `.env.example` to `.env.local` and fill in the two required values
+   (both sides read this one file):
 
-   ```
+   ```bash
    GROQ_API_KEY=gsk_your_key_here
+   MONGODB_URI=mongodb+srv://...
+   MONGODB_DB=mantraa_ai
    ```
+
+   Comma-separate several keys for the same provider to rotate them
+   round-robin: `GROQ_API_KEY=gsk_first,gsk_second`.
 
 2. Install the Python agent's dependencies once:
 
    ```bash
+   npm install
    npm run setup:api
    npm run setup:tts   # optional: spoken replies, needs Python >= 3.10 + espeak-ng
    ```
+
+Everything else in `.env.example` is optional and degrades cleanly when unset —
+see [What each key turns on](#what-each-key-turns-on).
 
 ## Running it
 
@@ -41,19 +54,108 @@ npm run dev        # Next.js UI on :3000
 ```
 
 Open <http://localhost:3000>. Check the agent alone at
-<http://localhost:8000/health>.
+<http://localhost:8000/health>, which reports the model, the masked key
+rotation, storage backend and whether speech is installed.
+
+## What each key turns on
+
+| Key | Unset behaviour |
+| --- | --- |
+| `GROQ_API_KEY` / `LLM_API_KEY` | **Required.** Nothing answers without one |
+| `MONGODB_URI`, `MONGODB_DB` | **Required.** Accounts refuse; `store.py` falls back to memory and forgets on restart |
+| `VOYAGE_API_KEY` | Inbuilt RAG is off: `search_document` is not offered to the model and `/documents` cannot index |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | The Google button is absent; email/password sign-in still works |
+| `DEVELOPER_EMAILS` | No account is exempt from the quotas below |
+| `KITTEN_TTS_MODEL`, `HINDI_TTS_MODEL` | Spoken replies are disabled; the speaker button explains why |
+| `AGENT_TOKEN` | Agent accepts unauthenticated calls — fine on localhost, set it when the two halves deploy apart |
+| `LANGSMITH_*` | Tracing is a no-op |
+
+## Accounts and quotas
+
+Sign-in is email/password or Google (`NEXT_PUBLIC_GOOGLE_CLIENT_ID`; the ID
+token is verified server-side with `google-auth-library`, so no client secret is
+needed). Sessions are a cookie backed by a `sessions` collection with a TTL
+index, so Mongo expires them and nothing sweeps.
+
+| | Signed out | Free plan | Pro |
+| --- | --- | --- | --- |
+| Chat turns | 5 per thread | 50 credits | ₹299/month |
+| Voice turns | 2 per call | same 50 credits | same |
+| Inbuilt RAG | unavailable | 1 document, for the lifetime of the account | same |
+| History saved | no | yes | yes |
+
+The guest numbers live in `src/lib/limits.ts` and are enforced **twice** —
+once in the browser so the limit is visible before someone types into a box
+that will refuse them, and once in `/api/chat`, which is what actually stops a
+turn. Voice and chat share that route and are told apart by the `voice` flag,
+so the two allowances are counted separately.
+
+`DEVELOPER_EMAILS` (comma-separated) lists accounts exempt from all of it.
+Mirrored on both sides: `store.is_developer` in Python, `isDeveloper` in
+`src/lib/limits.ts`. It is not a `NEXT_PUBLIC_` variable, so it reads back
+empty in the browser and every caller is treated as ordinary — the safe
+direction to fail.
+
+## Storage
+
+`server/store.py` is the only thing that touches conversation state, and it
+speaks to **MongoDB Atlas** with an in-memory fallback for when the database is
+unreachable. Guests own nothing: every helper refuses to read, write or list
+without an account email, which is what keeps a signed-out visitor on a single
+unsaved window.
+
+| Collection | Holds |
+| --- | --- |
+| `conversations` | Threads and their messages, tagged `kind: "chat"` or `"rag"` |
+| `users` | Accounts, plans, credits, the one-RAG flag |
+| `sessions` | Session cookies, TTL-expired by Mongo |
+| `document_chunks` | RAG chunks and their vectors |
+| `tool_calls` | The tool-call log |
+
+`kind` is what separates the sidebar's two lists. It is queried with `$ne:
+"rag"` rather than `== "chat"`, so conversations stored before the field
+existed still count as ordinary ones and nothing needed a migration.
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| `src/app/page.tsx` | Chat workspace; reads `?c=<id>` to open a thread |
+| `src/app/voice/page.tsx` | AI Voice Chat: hands-free speak-to-speak call + live transcript |
+| `src/app/documents/page.tsx` | Inbuilt RAG: guide, then index, then chat |
+| `src/app/tools/page.tsx` | What the agent can call, read from the Python registry |
+| `src/app/plans/`, `src/app/profile/` | Plans and account settings |
+| `src/app/api/` | Proxies: `chat`, `conversations`, `documents/ingest`, `tools`, `tts`, `health` |
+| `src/app/api/auth/` | Accounts: register, login, Google, logout, me, profile, plan |
+| `src/lib/useChat.ts` | Streaming client; owns conversation identity |
+| `src/lib/useVoice.ts` | Dictation (Web Speech API) and spoken replies (KittenTTS) |
+| `src/lib/useVoiceCall.ts` | Turn taking for the voice page: listen -> send -> speak -> listen |
+| `src/lib/attachments.ts` | Reading PDF, DOCX and text files in the browser |
+| `src/lib/limits.ts` | Guest allowances and the developer exemption |
+| `src/lib/session.ts` | Session cookies and the signed-in user record |
+| `server/main.py` | FastAPI endpoints |
+| `server/agent.py` | LLM streaming + tool-calling loop |
+| `server/tools.py` | Tool schemas, implementations, and the registry |
+| `server/store.py` | Conversations, accounts and activity in MongoDB |
+| `server/rag.py` | Document chunking, Voyage embeddings and Atlas vector search |
+| `server/policy.py` | Answering policy composed onto the system prompt |
+| `server/llm.py` | Provider resolution and key rotation |
+| `server/duckduckgo.py` | DuckDuckGo search client |
+| `server/tts.py` | KittenTTS wrapper: model loading, WAV encoding, espeak-ng lookup |
 
 ## Answering policy
 
-`server/policy.py` holds three sections, composed onto the base prompt by
-`policy.apply()`. All three are always on -- there is no topic restriction, so
-the assistant answers questions on any subject.
+`server/policy.py` holds the sections composed onto the base prompt by
+`policy.apply()`. There is no topic restriction — the assistant answers
+questions on any subject.
 
 | Section | Request | Behaviour |
 | --- | --- | --- |
 | Secrets | API keys, passwords, tokens, env file contents | Replies exactly `I can't answer these type of questions.` and calls no tool |
 | Identity | "who are you", "are you ChatGPT", "which model are you" | Answers as SIMP, built by an independent developer; never names the model or provider |
-| Conduct | Rudeness, swearing, insults | Answers the question anyway, in a level tone — see below |
+| Conduct | Rudeness, swearing, insults | Answers the question anyway, in a level tone |
+| Language | Any | Mirrors the language it was asked in, always writing Hindi in Devanagari |
+| Voice | Voice turns only | Two or three sentences, no markdown, no code, no URLs |
 
 ### Identity
 
@@ -85,117 +187,137 @@ reliably count "third message running". Triggering on *whether it has happened
 before in this conversation* is a presence check they can actually see, and it
 fires reliably.
 
-## Tracing (optional)
-
-Turns can be traced to [LangSmith](https://smith.langchain.com). Add to `.env.local`:
-
-```bash
-LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=lsv2_your_key_here
-LANGSMITH_PROJECT=Chat-app
-```
-
-Restart the agent and each turn appears as a tree:
-
-```
-SIMP turn (chain)
-├── openai/gpt-oss-120b (llm)   one span per tool round
-├── web_search (tool)
-└── openai/gpt-oss-120b (llm)
-```
-
-`server/tracing.py` is the whole integration. Without the flag and key every call
-in it is a no-op, and any LangSmith failure is swallowed — tracing can slow a
-turn down but never break one.
-
-## Storage
-
-Conversations and the tool-call log live in `server/store.py` — **in memory**, so
-they clear when the agent restarts. That module is the seam for a database:
-every read and write goes through its functions, so swapping in real persistence
-touches one file.
-
-| In memory today | Becomes |
-| --- | --- |
-| `_conversations` | `conversations` + `messages` tables |
-| `_tool_calls` | `tool_calls` table |
-
-## Layout
-
-| Path | Role |
-| --- | --- |
-| `src/app/page.tsx` | Chat workspace; reads `?c=<id>` to open a thread |
-| `src/app/security/` | Permissions derived from the tool registry + audit log |
-| `src/app/activity/` | Real tool-call log, filterable |
-| `src/lib/attachments.ts` | Reading and rendering attached text files |
-| `src/app/api/` | Proxies: `chat`, `conversations`, `conversations/[id]`, `activity`, `tools` |
-| `src/lib/useChat.ts` | Streaming client; owns conversation identity |
-| `src/lib/agent.ts` | Server-side helpers for reaching the agent |
-| `src/app/voice/page.tsx` | AI Voice Chat: hands-free speak-to-speak call + live transcript |
-| `src/lib/useVoice.ts` | Dictation (Web Speech API) and spoken replies (KittenTTS) |
-| `src/lib/useVoiceCall.ts` | Turn taking for the voice page: listen -> send -> speak -> listen |
-| `server/tts.py` | KittenTTS wrapper: model loading, WAV encoding, espeak-ng lookup |
-| `server/main.py` | FastAPI endpoints |
-| `server/agent.py` | Groq streaming + tool-calling loop |
-| `server/tools.py` | Tool schemas, implementations, and the registry |
-| `server/store.py` | In-memory conversations and activity |
-| `server/duckduckgo.py` | DuckDuckGo search client |
-| `server/rag.py` | Document chunking, Voyage embeddings and Atlas vector search |
-| `src/app/tools/` | AI Tools hub |
-
 ## LLM tools
 
-The agent decides which to call; the UI shows each call as an expandable card,
-and every call is recorded to the activity log with its duration.
+The agent decides which to call; the UI shows each call as a one-line status
+while it runs, and every call is recorded with its duration.
 
 - **`ask_options`** — ask the user to pick from 3 choices before answering (`question`, `options`); the UI renders them as buttons
-- **`web_search`** — search the public web via DuckDuckGo (`query`); returns the single best result, once per message
+- **`web_search`** — search the public web via DuckDuckGo (`query`); returns up to 5 results, once per message
 - **`search_document`** — search a document indexed for this conversation (`query`); once per message. Offered to the model only when `VOYAGE_API_KEY` is set
 
-While a tool runs the chat shows a one-line status ("Searching the web…"). On
-success the line disappears and only the answer remains — raw arguments and
-results are never shown in the chat; they live on the Activity page. Failures
-stay visible, so a broken step is never silent.
+On success the status line disappears and only the answer remains — raw
+arguments and results are never shown in the chat. Failures stay visible, so a
+broken step is never silent.
+
+### The tool loop
+
+1. The request goes to the model with all available tool schemas attached.
+2. If the model asks for a tool, the server runs it, records it, appends the
+   result, and calls the model again.
+3. Repeats until it answers in plain text (capped at `MAX_TOOL_ROUNDS = 5`).
+
+Events stream back as newline-delimited JSON: `conversation`, `text`,
+`tool_call`, `tool_result`, `error`, `done`.
+
+`ONCE_PER_TURN` in `agent.py` caps `web_search`, `ask_options` and
+`search_document` at one call per turn — for all three, a reworded query rarely
+surfaces what the first one missed, and letting the model retry burns the round
+budget in silence. Identical calls to any tool are also cached within a turn.
+
+### Adding a tool
+
+Add one entry to the `TOOLS` dict in `server/tools.py` — a JSON schema plus the
+Python function. The Tools page and the starter prompts read the registry, so
+they pick it up with no UI changes. Give it an `available` lambda if it needs a
+key, and it will be hidden rather than offered and then failing.
 
 ### Clarifying questions
 
 When a question is ambiguous and the answer would differ by choice — "what is a
 for loop" with no language named — the agent calls `ask_options` instead of
 guessing. The UI turns the options into buttons; clicking one sends it as the
-next message, and anything not offered can just be typed. Capped at one call per
-turn, like `web_search`.
+next message, and anything not offered can just be typed.
 
-### File attachments
+## Inbuilt RAG
 
-The paperclip in the composer accepts text files (see `ACCEPTED_EXTENSIONS` in
-`src/lib/attachments.ts`). Files are read in the browser, capped at 2 MB and
-20,000 characters, and appended to the message so the model reads them directly
-— there is no separate parsing step or upload endpoint. Binary files are rejected
-by scanning for control bytes rather than trusting the extension.
+Ask questions grounded in your own document instead of what the model happens to
+know. `/documents` is the dedicated entry point, and it is deliberately
+two-phase: index first, confirm, *then* ask. Indexing waits on Atlas' search
+index catching up, so combining both into one request would mean typing a
+question against a document that is not searchable yet.
 
-The stored message keeps the file body because the model needs it; the chat shows
-the user a filename chip instead of pasting their file back at them.
+```
+PDF/DOCX/text ──▶ chunk ──▶ Voyage embeddings ──▶ document_chunks (+ vector)
+                                                        │
+question ──▶ embed ──▶ $vectorSearch (scoped to conversation) ──▶ top 5 chunks
+```
 
-### Voice
+**Files are read in the browser.** `pdfjs-dist` for PDF, `mammoth` for DOCX,
+both dynamically imported so neither is in the initial bundle. There is no
+upload endpoint and no server-side parsing step; only extracted text crosses the
+wire. `.doc` is rejected with a message saying to save as `.docx` or PDF.
 
-Two separate halves, both driven from the right-hand side of the composer:
+Two separate caps, for two separate reasons: `MAX_BYTES` (10 MB) is what the
+browser will open, and `MAX_EXTRACTED_CHARS` (4M) is what may be sent — Vercel
+hard-caps a Function's request body at 4.5 MB, so a file that opens fine can
+still be too large to submit.
 
-**Mic — talking to it.** Dictation runs entirely in the browser on the Web Speech
-API, so there is no audio upload and no speech endpoint. Settled phrases are
-appended to whatever is already in the box; the words still being decided show
-under the input as you speak. Review, edit, then send — dictation never
+**Chunking and embedding are configurable.** The Settings card offers defaults
+(2800 characters, 400 overlap, 1024 dimensions) or a Customize mode. Every value
+is clamped again server-side by `clamp_chunking` / `clamp_dimension` — a request
+body is not a trusted source of truth.
+
+Dimension needs care: Atlas fixes `numDimensions` at index creation, so vectors
+of different lengths cannot share an index. Each dimension in use gets its own,
+created lazily on first ingest at that width (`index_name_for`), and `search()`
+looks up which one a conversation's chunks were written at rather than assuming
+the default.
+
+### Rate limits are the hard part
+
+Voyage's free tier (no payment method on file) allows 3 requests **and 10,000
+tokens** per minute. The token half is what bites: an ordinary PDF chapter is
+~13,000 tokens, so embedding a document's chunks in one call is over the whole
+minute's budget by itself. It fails immediately and *keeps* failing however long
+you wait, because waiting never makes one oversized request fit.
+
+So `rag.embed` splits into token-sized batches and paces them through a rolling
+window limiter, spending as many minutes as the document needs. The budget is
+set to 6,000 rather than the documented 10,000 on purpose — measured against the
+real API, a batch counted locally at 7,389 tokens was accepted on a clean window
+and one at 8,463 was rejected, so Voyage's server-side count runs above what the
+local tokenizer reports.
+
+That makes indexing a **minutes-long** operation, which the rest of the design
+has to admit: `/api/documents/ingest` declares `maxDuration = 300`, and
+`/documents` estimates the wait before you submit and refuses anything that
+would outlive the request.
+
+### Mid-chat attachments
+
+A file attached in the composer past `MAX_CHARS` (20,000) is marked `(large)`
+and routed to the same pipeline instead of being pasted whole into context —
+see `_route_large_attachments` in `main.py`. The UI shows an "Indexing your
+document" card so the wait is not a silent pause. Smaller files still go inline,
+which is cheaper and needs no vector search.
+
+`search_document` never takes a conversation id: the model has no reason to know
+one. It reads `rag.CURRENT_CONVERSATION`, a `ContextVar` that `stream_chat` sets
+immediately before **every** `run_tool` call rather than once at the top —
+Starlette iterates a plain generator through a threadpool, and a resumption
+after a `yield` can land on a worker thread whose copy of the context never saw
+the earlier `.set()`, silently reading back as `None`.
+
+## Voice
+
+Two separate halves, both driven from the right-hand side of the composer.
+
+**Mic — talking to it.** Dictation runs entirely in the browser on the Web
+Speech API, so there is no audio upload and no speech endpoint. Settled phrases
+are appended to whatever is already in the box; the words still being decided
+show under the input as you speak. Review, edit, then send — dictation never
 auto-submits. The button is absent where the API is not (Firefox, and any
 non-secure origin other than localhost).
 
-**Speaker — hearing it back.** Two engines, picked per request by the script
-the text is written in: [KittenTTS](https://github.com/KittenML/KittenTTS) for
+**Speaker — hearing it back.** Two engines, picked per request by the script the
+text is written in: [KittenTTS](https://github.com/KittenML/KittenTTS) for
 English, `facebook/mms-tts-hin` for Hindi. Both are CPU-only and small; see
-[Hindi](#hindi) below. `server/tts.py` loads the model once on first use and returns a 24 kHz mono
-WAV, which `/api/tts` carries to the browser. Markdown is stripped to prose
-first (`speakable()`), because asterisks and code fences narrate badly, and long
-replies are trimmed to 1200 characters on a sentence boundary so they end
-cleanly rather than mid-word. Toggle it off and anything mid-sentence stops; a
-new question cuts off the answer to the old one.
+[Hindi](#hindi). `server/tts.py` loads the model once on first use and returns a
+24 kHz mono WAV, which `/api/tts` carries to the browser. Markdown is stripped
+to prose first (`speakable()`), because asterisks and code fences narrate badly,
+and long replies are trimmed to 1200 characters on a sentence boundary so they
+end cleanly rather than mid-word.
 
 Speech is optional. Without it installed the endpoint reports why and the
 speaker button renders disabled with the fix in its tooltip — the rest of the
@@ -209,10 +331,21 @@ brew install espeak-ng   # Debian: sudo apt-get install espeak-ng
 Both are required. `espeak-ng` is the phonemiser KittenTTS calls, and the copy
 bundled in `espeakng_loader` cannot be used: it ignores the data path it is
 handed, looks for its own where it was compiled on a CI runner, and calls
-`exit()` when that is missing — which would take the API server down mid-request.
-`server/tts.py` therefore checks for a system espeak-ng *before* the model is
-imported, and re-points phonemizer at it *after* (importing KittenTTS pulls in
-`misaki.espeak`, which claims the wrapper for the broken build at import time).
+`exit()` when that is missing — which would take the API server down
+mid-request. `server/tts.py` therefore checks for a system espeak-ng *before*
+the model is imported, and re-points phonemizer at it *after* (importing
+KittenTTS pulls in `misaki.espeak`, which claims the wrapper for the broken
+build at import time).
+
+> **Python 3.10 or newer.** KittenTTS 0.8.1 depends on spaCy, whose current
+> builds do not support 3.9. `npm run setup:tts` checks this before installing
+> anything. To rebuild an older venv:
+> `rm -rf server/.venv && python3.10 -m venv server/.venv && npm run setup:api`.
+
+**Restart the agent after installing.** The model loads lazily on the first
+request, but `/tts` only exists in a process started from the current `main.py`.
+An agent left running from before will answer 404, which the UI reports as
+"running a build without the /tts route" rather than as a speech failure.
 
 ### AI Voice Chat
 
@@ -253,15 +386,15 @@ Two things get it there, and removing either puts it back to ~36s:
 answer into clips and `useSpeech` requests the next while the current one plays.
 Because synthesis outruns playback 3:1 the queue never runs dry, so only the
 *first* clip is ever waited on in silence — which is why it is deliberately the
-smallest, and why an over-long opening sentence gets broken at a clause
-boundary rather than setting the whole turn's wait on its own.
+smallest, and why an over-long opening sentence gets broken at a clause boundary
+rather than setting the whole turn's wait on its own.
 
 **Spoken replies are written for the ear.** A voice turn sets `voice: true`,
 which adds `VOICE_PROMPT`: two or three sentences, no markdown, no code, no
-URLs. The same question answered for the screen ran 1087 characters — 99
-seconds of talking; answered for the ear it is 273, or 25 seconds. Markdown is
-the worst of it, since it is all stripped by `speakable()` before synthesis and
-so costs generation time for nothing.
+URLs. The same question answered for the screen ran 1087 characters — 99 seconds
+of talking; answered for the ear it is 273, or 25 seconds. Markdown is the worst
+of it, since it is all stripped by `speakable()` before synthesis and so costs
+generation time for nothing.
 
 `SILENCE_MS` in `useVoiceCall.ts` is the one knob left worth touching. Lowering
 it shortens every turn, at the risk of cutting people off mid-sentence.
@@ -278,9 +411,9 @@ language-switch markers aloud:
               → model hears: hiˌaːp kˈɛːseː hɛenus?
 ```
 
-So Hindi goes to a second engine, `facebook/mms-tts-hin` — a 36M VITS
-checkpoint at 16 kHz that takes Devanagari directly, needs no romanisation step,
-and synthesises around 5x faster than realtime, comfortably inside the latency
+So Hindi goes to a second engine, `facebook/mms-tts-hin` — a 36M VITS checkpoint
+at 16 kHz that takes Devanagari directly, needs no romanisation step, and
+synthesises around 5x faster than realtime, comfortably inside the latency
 budget above.
 
 `tts.is_hindi()` routes on the *share* of Devanagari letters, not their mere
@@ -327,22 +460,11 @@ Voice and model are set by `KITTEN_TTS_VOICE` and `KITTEN_TTS_MODEL` — see
 `.env.example`. The eight voices are Bella, Jasper, Luna, Bruno, Rosie, Hugo,
 Kiki and Leo; `GET /api/tts` lists them alongside whether speech is available.
 
-> **Python 3.10 or newer.** KittenTTS 0.8.1 depends on spaCy, whose current
-> builds do not support 3.9. `npm run setup:tts` checks this before installing
-> anything. To rebuild an older venv:
-> `rm -rf server/.venv && python3.10 -m venv server/.venv && npm run setup:api`.
-
-**Restart the agent after installing.** The model itself loads lazily on the
-first request, but `/tts` only exists in a process started from the current
-`main.py`. An agent left running from before will answer 404, which the UI
-reports as "running a build without the /tts route" rather than as a speech
-failure.
-
-### Web search
+## Web search
 
 `server/duckduckgo.py` reads DuckDuckGo's `lite` HTML endpoint, falling back to
 the classic `html` one. There is no API key and no third-party search package —
-`httpx` already ships with the Groq SDK.
+`httpx` already ships with the OpenAI SDK.
 
 DuckDuckGo has no free official search API and rate-limits by IP, answering with
 an HTTP 202 anti-bot page when it thinks you are a script. The client detects
@@ -350,31 +472,44 @@ that specifically, retries with backoff, and then raises `SearchUnavailable`
 rather than returning an empty list — so the assistant reports the failure
 instead of quietly answering from memory. Sponsored rows are filtered out.
 
-**One search per message.** Rewording a blocked query never helps, and the model
-would otherwise burn three rounds retrying, so `ONCE_PER_TURN` in `agent.py` caps
-`web_search` at a single call per turn; further attempts get an error telling it
-to answer or report the failure. Identical calls to any tool are also cached
-within a turn rather than re-run.
-
-**One result per search.** `MAX_WEB_RESULTS = 1` in `tools.py` clamps it, and the
-schema has no `max_results` field so the model cannot widen it. Raise that
-constant to get more results back.
+**Five results per search** (`MAX_WEB_RESULTS` in `tools.py`). This was 1, and
+one result was not enough to answer with: the model would read the single hit,
+decide it had not found the answer, and search again — but `ONCE_PER_TURN` then
+handed it a refusal, which it did not accept either. It spent every remaining
+round rewording the query and the turn ended on "Stopped after too many tool
+calls", in silence, 15–40s later. Five results cost the same one HTTP round trip
+and let the first search actually answer.
 
 If searches start failing, you are being rate-limited; wait a few minutes. For
 heavy use, swap in a keyed search API — only `duckduckgo.py` would change.
 
-### The tool loop
+## Tracing (optional)
 
-1. The request goes to Groq with all tool schemas attached.
-2. If the model asks for a tool, the server runs it, records it, appends the
-   result, and calls Groq again.
-3. Repeats until the model answers in plain text (capped at `MAX_TOOL_ROUNDS = 5`).
+Turns can be traced to [LangSmith](https://smith.langchain.com). Add to
+`.env.local`:
 
-Events stream back as newline-delimited JSON: `conversation`, `text`,
-`tool_call`, `tool_result`, `error`, `done`.
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2_your_key_here
+LANGSMITH_PROJECT=Chat-app
+```
 
-### Adding a tool
+Restart the agent and each turn appears as a tree:
 
-Add one entry to the `TOOLS` dict in `server/tools.py` — a JSON schema plus the
-Python function. The Tools page, the context panel, the permissions list and the
-starter prompts all read the registry, so they pick it up with no UI changes.
+```
+SIMP turn (chain)
+├── openai/gpt-oss-120b (llm)   one span per tool round
+├── web_search (tool)
+└── openai/gpt-oss-120b (llm)
+```
+
+`server/tracing.py` is the whole integration. Without the flag and key every
+call in it is a no-op, and any LangSmith failure is swallowed — tracing can slow
+a turn down but never break one.
+
+## Deploying
+
+See [DEPLOY.md](DEPLOY.md). The short version: the Python agent goes to Render,
+the Next app to Vercel, they share `MONGODB_URI` and a matching `AGENT_TOKEN`,
+and document indexing needs a Vercel plan that allows functions longer than 60
+seconds.
