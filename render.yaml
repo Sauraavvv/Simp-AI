@@ -22,6 +22,15 @@ services:
         sync: false
       - key: MONGODB_URI
         sync: false
+      # Without this, search_document is never offered to the model and
+      # /documents/ingest cannot index -- Inbuilt RAG is off, silently.
+      - key: VOYAGE_API_KEY
+        sync: false
+      # Comma-separated accounts exempt from the one-document RAG cap. Unset
+      # means no exemption, so set it here too or the developer's own account
+      # is metered like everyone else in production.
+      - key: DEVELOPER_EMAILS
+        sync: false
       # Shared with Vercel -- same value in both places, or every call 401s.
       - key: AGENT_TOKEN
         generateValue: true

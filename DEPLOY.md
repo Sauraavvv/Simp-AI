@@ -36,6 +36,7 @@ Environment variables to set on Render:
 | `MONGODB_DB` | `mantraa_ai` |
 | `AGENT_TOKEN` | a long random string -- **the same one goes on Vercel** |
 | `VOYAGE_API_KEY` | **required for Inbuilt RAG**. Unset, `search_document` is not offered to the model and `/documents` cannot index |
+| `DEVELOPER_EMAILS` | comma-separated accounts exempt from the one-document RAG cap. Unset means nobody is exempt |
 | `LLM_MODEL`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
 | `PYTHON_VERSION` | `3.11.9` |
 
@@ -62,6 +63,8 @@ Import the same repo; the defaults for a Next.js project are correct and
 | `AGENT_URL` | `https://<service>.onrender.com` -- no trailing slash |
 | `AGENT_TOKEN` | the same value as on Render |
 | `MONGODB_URI`, `MONGODB_DB` | Atlas -- Next.js reads it directly for auth, sessions and credits |
+| `DEVELOPER_EMAILS` | the same value as on Render. Both halves check it independently -- Next for what `/documents` shows, Render for what it allows |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | optional -- unset just hides the Google button. Add the deployed origin to the OAuth client's authorised origins or the button 400s |
 
 **Document indexing needs a Vercel plan that allows long functions.** Voyage's
 free tier is rate limited per minute, so a document worth more than one minute
@@ -111,8 +114,9 @@ usable only by Vercel. Set it on both sides, or don't expose the service.
 
 **Render's free plan sleeps** after 15 minutes idle and takes ~50s to wake.
 `/api/chat` gives up at 60s (`maxDuration`), so the first message after a quiet
-spell can fail outright. The blueprint asks for `starter` for that reason; on
-`free`, expect the cold start or ping `/health` on a schedule to stay warm.
+spell can fail outright. `render.yaml` asks for `free` -- move it to `starter`
+if that first-message failure matters, or ping `/health` on a schedule to keep
+the instance warm.
 
 **Speech (TTS) is left out of the Render build.** `requirements-tts.txt` pulls
 in torch and transformers -- far past what a small instance holds in RAM, and a
