@@ -139,7 +139,7 @@ existed still count as ordinary ones and nothing needed a migration.
 | `server/tools.py` | Tool schemas, implementations, and the registry |
 | `server/store.py` | Conversations, accounts and activity in MongoDB |
 | `server/rag.py` | Document chunking, Voyage embeddings and Atlas vector search |
-| `server/policy.py` | Answering policy composed onto the system prompt |
+| `server/policy.py` | Answering policy, and per-turn language detection |
 | `server/llm.py` | Provider resolution and key rotation |
 | `server/websearch.py` | Picks the search provider; both return one shape |
 | `server/tavily.py` | Tavily search client (keyed, works from a datacenter) |
@@ -157,7 +157,7 @@ questions on any subject.
 | Secrets | API keys, passwords, tokens, env file contents | Replies exactly `I can't answer these type of questions.` and calls no tool |
 | Identity | "who are you", "are you ChatGPT", "which model are you" | Answers as SIMP, built by an independent developer; never names the model or provider |
 | Conduct | Rudeness, swearing, insults | Answers the question anyway, in a level tone |
-| Language | Any | Mirrors the language it was asked in, always writing Hindi in Devanagari |
+| Language | Any | Mirrors the language it was asked in, always writing Hindi in Devanagari. Pinned per turn by `policy.language_note` |
 | Voice | Voice turns only | Two or three sentences, no markdown, no code, no URLs |
 
 ### Identity
@@ -189,6 +189,36 @@ The turn-counting version of that fourth rule did not work — models do not
 reliably count "third message running". Triggering on *whether it has happened
 before in this conversation* is a presence check they can actually see, and it
 fires reliably.
+
+### Language
+
+`LANGUAGE_PROMPT` says to answer in the language the question was asked in.
+On its own that is not reliable, and the failure is specific: the model reads
+the **subject** as a language cue. Asked "who is the current ISRO chairman?" —
+plain English, English-only search results — it answered in Hindi **3 times in
+8**. Saying so more firmly in the prompt helped and did not fix it: still 2 in
+12.
+
+So the script is decided in Python instead. `policy.language_note` looks at the
+newest user message and states the language as a fact about this turn, which
+the model follows: **12 in 12** after the change.
+
+Three cases, and the middle one is why this is not just a Devanagari check:
+
+| User writes | Detected | Answer |
+| --- | --- | --- |
+| Devanagari (`≥20%` of letters) | hindi | Devanagari |
+| Romanised Hindi (`kaun hai`, `batao`) | hindi | Devanagari |
+| English | english | English |
+
+Romanised Hindi is Latin script, so the share test cannot see it — and calling
+it English is worse than saying nothing, because `LANGUAGE_PROMPT` requires a
+Devanagari answer to a romanised question and the note would then contradict
+it. It did, in testing, before a word list was added. That list deliberately
+excludes anything with an English homograph (`me`, `par`, `to`, `bat`, `ka`),
+since a false positive answers an English speaker in Devanagari — the more
+visible failure. Under 8 letters the function returns `None` and no note is
+added: a bare "ok" is not evidence of anything.
 
 ## LLM tools
 

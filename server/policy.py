@@ -21,9 +21,89 @@ Nothing else in the codebase depends on this file.
 """
 
 import os
+import re
+from typing import Any, Dict, List, Optional
 
 # The exact wording to use when declining to disclose a secret.
 REFUSAL_LINE = "I can't answer these type of questions."
+
+# Same script test tts.is_hindi uses, and for the same reason: a share of the
+# letters rather than their mere presence, so one English word in a Hindi
+# sentence (or one Hindi word in an English one) does not flip the verdict.
+_DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+_LETTERS = re.compile(r"[^\W\d_]", re.UNICODE)
+_HINDI_SHARE = 0.2
+
+
+# Romanised Hindi is Latin script, so the Devanagari share above cannot see it
+# -- and calling it English would be worse than saying nothing, because
+# LANGUAGE_PROMPT requires a Devanagari answer to a romanised question and this
+# note would then contradict it. (It did: "bhai ISRO ka chairman kaun hai abhi
+# batao" came back in English once this note started firing.)
+#
+# So: a small set of Hindi function words that are not also English words. One
+# match is enough. Deliberately excludes anything with an English homograph --
+# "me", "par", "to", "bat", "ka", "ki" -- since a false positive here answers
+# an English speaker in Devanagari, which is the more visible failure.
+_ROMAN_HINDI = {
+    "hai", "hain", "haan", "nahi", "nahin", "kya", "kyu", "kyun", "kaun",
+    "kaise", "kaisa", "kahan", "kitna", "kitne", "mujhe", "tumhe", "aap",
+    "mera", "meri", "tera", "teri", "hamara", "karo", "karna", "karke",
+    "batao", "bata", "bataye", "acha", "accha", "theek", "thik", "bhai",
+    "yeh", "woh", "kuch", "sakta", "sakti", "sakte", "chahiye", "matlab",
+    "abhi", "phir", "bahut", "bohot", "zyada", "thoda", "wala", "wali",
+    "hoga", "hogi", "raha", "rahi", "rahe", "gaya", "gayi", "diya", "liya",
+    "dena", "lena", "mein", "hoon", "samajh", "dekh", "sun", "chal", "chalu",
+}
+_WORDS = re.compile(r"[a-z]+")
+
+
+def language_of(text: str) -> Optional[str]:
+    """"hindi", "english", or None when there is too little to tell.
+
+    None matters: a bare "ok", an emoji or a code fragment is not evidence of
+    anything, and guessing from it would pin the turn to a language the user
+    never chose.
+    """
+    text = text or ""
+    letters = _LETTERS.findall(text)
+    if len(letters) < 8:
+        return None
+
+    if len(_DEVANAGARI.findall(text)) / len(letters) >= _HINDI_SHARE:
+        return "hindi"
+
+    if _ROMAN_HINDI & set(_WORDS.findall(text.lower())):
+        return "hindi"
+
+    return "english"
+
+
+def language_note(history: List[Dict[str, Any]]) -> str:
+    """A per-turn instruction naming the language of the newest user message.
+
+    LANGUAGE_PROMPT alone is not reliable enough. Measured against a single
+    English question on an Indian topic ("who is the current ISRO chairman?"),
+    the model answered in Hindi 3 times in 8 -- it reads the *subject* as a
+    language cue however plainly the standing rule says otherwise. Spelling the
+    rule out more firmly helped and did not fix it: still 2 in 12.
+
+    So the script is decided here, in Python, from the text the user actually
+    typed, and stated as a fact about this turn rather than left to inference.
+    """
+    for message in reversed(history or []):
+        if message.get("role") != "user":
+            continue
+        language = language_of(str(message.get("content") or ""))
+        if language is None:
+            return ""
+        return (
+            "\n\n## This turn\n\n"
+            f"The user wrote this message in {language}. Answer it in "
+            f"{language}, whatever the subject is and whatever language your "
+            "sources are in."
+        )
+    return ""
 
 SECRETS_PROMPT = """
 ## Secrets
@@ -109,6 +189,14 @@ LANGUAGE_PROMPT = """
 Reply in the language the question was asked in. Hindi in, Hindi out; English
 in, English out. If the user mixes the two, mix them back the same way rather
 than straightening it out into one language -- that is how they chose to talk.
+
+Only the words the user actually typed decide this. The **subject** of the
+question never does. A question about ISRO, Indian politics, cricket, Bollywood
+or any other Indian topic, asked in English, is an English question and gets an
+English answer -- the same as a question about NASA would. Likewise, English
+text inside a tool result or a search snippet is not the user asking in
+English, and Hindi text in one is not the user asking in Hindi: the sources you
+read are evidence about the answer, never about the language to write it in.
 
 Write Hindi in Devanagari, never romanised. This is not a style preference: the
 speech engine reads Devanagari properly and mispronounces romanised Hindi as

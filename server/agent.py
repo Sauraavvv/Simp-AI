@@ -179,8 +179,14 @@ def stream_chat(
     force_answer = False
     nudged = False  # ANSWER_NOW is worth saying once, not once per round
     # policy.apply is a temporary, removable restriction -- see policy.py.
+    # language_note pins this turn's reply to the script the user actually
+    # typed in. The standing rule in LANGUAGE_PROMPT is not enough on its own --
+    # see the measurements in policy.language_note.
     messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": policy.apply(SYSTEM_PROMPT, voice)}
+        {
+            "role": "system",
+            "content": policy.apply(SYSTEM_PROMPT, voice) + policy.language_note(history),
+        }
     ]
     messages.extend({"role": m["role"], "content": m["content"]} for m in history)
 
