@@ -31,6 +31,11 @@ services:
       # is metered like everyone else in production.
       - key: DEVELOPER_EMAILS
         sync: false
+      # Required in production specifically. DuckDuckGo answers a residential
+      # IP fine and hangs on a datacenter one, so without this every web_search
+      # here burns its whole timeout budget and returns nothing.
+      - key: TAVILY_API_KEY
+        sync: false
       # Shared with Vercel -- same value in both places, or every call 401s.
       - key: AGENT_TOKEN
         generateValue: true

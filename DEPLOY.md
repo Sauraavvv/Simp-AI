@@ -37,6 +37,7 @@ Environment variables to set on Render:
 | `AGENT_TOKEN` | a long random string -- **the same one goes on Vercel** |
 | `VOYAGE_API_KEY` | **required for Inbuilt RAG**. Unset, `search_document` is not offered to the model and `/documents` cannot index |
 | `DEVELOPER_EMAILS` | comma-separated accounts exempt from the one-document RAG cap. Unset means nobody is exempt |
+| `TAVILY_API_KEY` | **required in production.** DuckDuckGo answers a residential IP and hangs on a datacenter one, so without this every `web_search` here burns its budget and returns nothing |
 | `LLM_MODEL`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
 | `PYTHON_VERSION` | `3.11.9` |
 

@@ -9,9 +9,9 @@ so nothing in the UI needs changing.
 import json
 from typing import Any, Callable, Dict, List
 
-import duckduckgo
 import rag
 import store
+import websearch
 
 # --------------------------------------------------------------------------
 # implementations
@@ -32,19 +32,19 @@ MAX_WEB_RESULTS = 5
 
 
 def web_search(query: str, max_results: int = MAX_WEB_RESULTS) -> Dict[str, Any]:
-    """Search the public web through DuckDuckGo."""
+    """Search the public web -- see websearch.py for which provider runs."""
     query = str(query or "").strip()
     if not query:
         raise ValueError("A search query is required")
 
     limit = max(1, min(int(max_results), MAX_WEB_RESULTS))
-    results = duckduckgo.search(query, limit)
+    results = websearch.search(query, limit)
 
     return {
         "query": query,
         "result_count": len(results),
         "results": results,
-        "source": "duckduckgo.com",
+        "source": websearch.provider(),
     }
 
 

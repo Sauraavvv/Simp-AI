@@ -31,8 +31,25 @@ USER_AGENT = (
 # when the scraped endpoints are rate-limited.
 INSTANT_ANSWER = "https://api.duckduckgo.com/"
 
-TIMEOUT_SECONDS = 15.0
-ATTEMPT_DELAYS = (0.0, 1.5, 4.0)  # backoff before each attempt
+TIMEOUT_SECONDS = 6.0
+ATTEMPT_DELAYS = (0.0, 1.5)  # backoff before each attempt
+
+# The whole search -- every attempt, every endpoint, the fallback, and the
+# sleeps between them -- must finish inside this.
+#
+# Not a nicety. The caller's request budget is finite (/api/chat declares
+# maxDuration = 60) and the model still has to write an answer *after* the
+# tool returns. Overrunning it is strictly worse than failing: the function
+# is killed mid-stream, so the turn ends with no tool_result, no error and
+# no done event -- the user sees the tool start and then nothing at all,
+# with nothing in the UI to say why.
+#
+# This existed as arithmetic before (3 attempts x 2 endpoints x 15s + backoff
+# = 96s, against a 60s request) and that is exactly how it failed in
+# production, where DuckDuckGo hangs on datacenter IPs rather than answering.
+# A wall-clock deadline is checked instead of trusted arithmetic, so adding an
+# endpoint or an attempt later cannot quietly reintroduce the overrun.
+TOTAL_BUDGET_SECONDS = 20.0
 
 
 class SearchUnavailable(RuntimeError):
@@ -114,13 +131,18 @@ def _parse(page: str, link_re: re.Pattern, snippet_re: re.Pattern, limit: int):
     return results
 
 
-def _instant_answer(query: str, limit: int) -> List[Dict[str, str]]:
-    """Fallback: DuckDuckGo's Instant Answer API."""
+def _instant_answer(query: str, limit: int, timeout: float = TIMEOUT_SECONDS) -> List[Dict[str, str]]:
+    """Fallback: DuckDuckGo's Instant Answer API.
+
+    `timeout` is whatever is left of the caller's budget, not a fixed value --
+    this runs last, so it is the call most likely to be the one that would
+    overrun it.
+    """
     response = httpx.get(
         INSTANT_ANSWER,
         params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
         headers={"User-Agent": USER_AGENT},
-        timeout=TIMEOUT_SECONDS,
+        timeout=timeout,
         follow_redirects=True,
     )
     if response.status_code != 200:
@@ -178,18 +200,31 @@ def search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     Raises SearchUnavailable if DuckDuckGo blocks every attempt.
     """
     last_error: Optional[str] = None
+    deadline = time.monotonic() + TOTAL_BUDGET_SECONDS
+
+    def remaining() -> float:
+        return deadline - time.monotonic()
 
     for delay in ATTEMPT_DELAYS:
         if delay:
+            # Never sleep into the deadline -- a backoff that leaves no time to
+            # make the request it is backing off for is pure waste.
+            if remaining() <= delay + 1.0:
+                break
             time.sleep(delay)
 
         for endpoint, link_re, snippet_re in ENDPOINTS:
+            left = remaining()
+            if left <= 1.0:
+                last_error = last_error or "ran out of time before DuckDuckGo answered"
+                break
+
             try:
                 response = httpx.post(
                     endpoint,
                     data={"q": query},
                     headers={"User-Agent": USER_AGENT},
-                    timeout=TIMEOUT_SECONDS,
+                    timeout=min(TIMEOUT_SECONDS, left),
                     follow_redirects=True,
                 )
             except httpx.HTTPError as exc:
@@ -208,13 +243,16 @@ def search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
             if response.status_code == 200:
                 return []
 
-    # Scraped endpoints are blocked; try the official JSON API before giving up.
-    try:
-        fallback = _instant_answer(query, max_results)
-        if fallback:
-            return fallback
-    except httpx.HTTPError as exc:
-        last_error = "instant answer failed: {}".format(exc)
+    # Scraped endpoints are blocked; try the official JSON API before giving up,
+    # but only if there is budget left to try it in.
+    left = remaining()
+    if left > 1.0:
+        try:
+            fallback = _instant_answer(query, max_results, timeout=min(TIMEOUT_SECONDS, left))
+            if fallback:
+                return fallback
+        except httpx.HTTPError as exc:
+            last_error = "instant answer failed: {}".format(exc)
 
     raise SearchUnavailable(
         "Web search is temporarily rate-limited by DuckDuckGo. Try again in a minute."

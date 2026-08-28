@@ -64,6 +64,7 @@ rotation, storage backend and whether speech is installed.
 | `GROQ_API_KEY` / `LLM_API_KEY` | **Required.** Nothing answers without one |
 | `MONGODB_URI`, `MONGODB_DB` | **Required.** Accounts refuse; `store.py` falls back to memory and forgets on restart |
 | `VOYAGE_API_KEY` | Inbuilt RAG is off: `search_document` is not offered to the model and `/documents` cannot index |
+| `TAVILY_API_KEY` | Web search falls back to scraped DuckDuckGo, which works locally but hangs from a datacenter |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | The Google button is absent; email/password sign-in still works |
 | `DEVELOPER_EMAILS` | No account is exempt from the quotas below |
 | `KITTEN_TTS_MODEL`, `HINDI_TTS_MODEL` | Spoken replies are disabled; the speaker button explains why |
@@ -140,7 +141,9 @@ existed still count as ordinary ones and nothing needed a migration.
 | `server/rag.py` | Document chunking, Voyage embeddings and Atlas vector search |
 | `server/policy.py` | Answering policy composed onto the system prompt |
 | `server/llm.py` | Provider resolution and key rotation |
-| `server/duckduckgo.py` | DuckDuckGo search client |
+| `server/websearch.py` | Picks the search provider; both return one shape |
+| `server/tavily.py` | Tavily search client (keyed, works from a datacenter) |
+| `server/duckduckgo.py` | DuckDuckGo search client (scraped, free, fallback) |
 | `server/tts.py` | KittenTTS wrapper: model loading, WAV encoding, espeak-ng lookup |
 
 ## Answering policy
@@ -193,7 +196,7 @@ The agent decides which to call; the UI shows each call as a one-line status
 while it runs, and every call is recorded with its duration.
 
 - **`ask_options`** — ask the user to pick from 3 choices before answering (`question`, `options`); the UI renders them as buttons
-- **`web_search`** — search the public web via DuckDuckGo (`query`); returns up to 5 results, once per message
+- **`web_search`** — search the public web (`query`); returns up to 5 results, once per message. Tavily when keyed, DuckDuckGo otherwise
 - **`search_document`** — search a document indexed for this conversation (`query`); once per message. Offered to the model only when `VOYAGE_API_KEY` is set
 
 On success the status line disappears and only the answer remains — raw
@@ -462,9 +465,43 @@ Kiki and Leo; `GET /api/tts` lists them alongside whether speech is available.
 
 ## Web search
 
-`server/duckduckgo.py` reads DuckDuckGo's `lite` HTML endpoint, falling back to
-the classic `html` one. There is no API key and no third-party search package —
+Two providers behind one `web_search` tool, picked in `server/websearch.py`.
+Neither `tools.py` nor the agent nor the Sources panel knows which one ran —
+both return the same `[{title, url, snippet}]`.
+
+**Tavily runs first whenever `TAVILY_API_KEY` is set.** The obvious arrangement
+is the other way round — free scraping first, spend the metered quota only when
+it fails — and it is wrong here. DuckDuckGo does not fail fast from a
+datacenter; it *hangs*, and `duckduckgo.py` spends its whole 20s budget
+discovering that. Trying it first would put 20 dead seconds in front of every
+production search, out of a 60s request that still has to write an answer.
+
+**DuckDuckGo is the fallback**, and with no key configured it is the only
+provider — which is what keeps a fresh clone working with nothing to sign up
+for. `server/duckduckgo.py` reads DuckDuckGo's `lite` HTML endpoint, falling
+back to the classic `html` one. No key, no third-party search package;
 `httpx` already ships with the OpenAI SDK.
+
+Quota is not what decides the order: `web_search` is capped at one call per
+turn, so Tavily's 1,000 free searches a month are 1,000 conversations.
+
+### The whole search must fit in one budget
+
+`duckduckgo.py` enforces a wall-clock `TOTAL_BUDGET_SECONDS` (20s) across every
+attempt, every endpoint, the instant-answer fallback and the sleeps between
+them. This is not a nicety.
+
+`/api/chat` declares `maxDuration = 60`, and the model still has to generate an
+answer *after* the tool returns. Overrunning that is strictly worse than
+failing: the function is killed mid-stream, so the turn ends with no
+`tool_result`, no `error` and no `done` — the user watches the tool start and
+then nothing, with nothing in the UI to say why.
+
+That is not hypothetical. The budget used to be arithmetic rather than a
+deadline — 3 attempts × 2 endpoints × 15s + backoff = 96s, against a 60s
+request — and in production it failed exactly that way. A deadline is checked
+against the clock instead of trusted, so adding an endpoint or an attempt later
+cannot quietly reintroduce the overrun.
 
 DuckDuckGo has no free official search API and rate-limits by IP, answering with
 an HTTP 202 anti-bot page when it thinks you are a script. The client detects
