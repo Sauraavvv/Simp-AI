@@ -259,14 +259,22 @@ function VoiceCall() {
     if (call.phase === "speaking") setTranscriptOpen(true);
   }, [call.phase]);
 
-  // Hang up as soon as the last free turn has been answered. Leaving the mic
-  // open would let someone keep talking into a call whose next turn the route
-  // is already going to refuse.
+  // Hang up once the last free turn is *finished* -- answered and spoken --
+  // rather than the moment it is sent. The allowance is two exchanges, not two
+  // questions: useChat.send appends the user's message before the reply
+  // streams, so this count reaches the limit while the answer to it is still
+  // being written, and ending here would cut off the very turn being paid for
+  // (call.end stops speech mid-sentence).
+  //
+  // "listening" is the phase that means the turn is over: not thinking (the
+  // stream is closed) and not speaking (the audio finished). Waiting for it is
+  // what lets the second answer be heard in full before the mic closes.
   const callEnd = call.end;
   const callActive = call.active;
+  const turnFinished = call.phase === "listening";
   useEffect(() => {
-    if (guestLimitReached && callActive) callEnd();
-  }, [guestLimitReached, callActive, callEnd]);
+    if (guestLimitReached && callActive && turnFinished) callEnd();
+  }, [guestLimitReached, callActive, turnFinished, callEnd]);
 
   // What the recogniser has settled on this turn, plus what it is still deciding.
   const saying = [call.heard, call.interim].filter(Boolean).join(" ");
