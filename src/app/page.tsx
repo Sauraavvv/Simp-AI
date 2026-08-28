@@ -17,6 +17,7 @@ import { useChat } from "@/lib/useChat";
 import { useSpeech } from "@/lib/useVoice";
 import { buildMessage, splitMessage } from "@/lib/attachments";
 import { GUEST_CHAT_PROMPTS } from "@/lib/limits";
+import { useGuestUsage } from "@/lib/useGuestUsage";
 import { SELECT_CONVERSATION, type Attachment, type Message } from "@/lib/types";
 
 function formatUserError(rawError: string): string {
@@ -212,7 +213,12 @@ function Chat() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const guestPromptsCount = messages.filter((m) => m.role === "user").length;
+  // Turns already spent before this page load -- see useGuestUsage. Without
+  // it a reload showed an untouched allowance, because this list starts empty
+  // while the server-side tally does not.
+  const guestUsedBefore = useGuestUsage("chat", !user);
+  const guestPromptsCount =
+    (guestUsedBefore ?? 0) + messages.filter((m) => m.role === "user").length;
   const isGuestLimitReached = !user && guestPromptsCount >= GUEST_CHAT_PROMPTS;
 
   const { enabled: speechEnabled, speak: speechSpeak } = speech;

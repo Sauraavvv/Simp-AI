@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useSession } from "@/lib/auth";
 import { GUEST_VOICE_TURNS } from "@/lib/limits";
+import { useGuestUsage } from "@/lib/useGuestUsage";
 import { useChat } from "@/lib/useChat";
 import { useVoiceCall, type CallPhase } from "@/lib/useVoiceCall";
 import type { Message } from "@/lib/types";
@@ -250,7 +251,9 @@ function VoiceCall() {
   // transcript rather than tracked separately, so it cannot fall out of step
   // with what was actually sent -- and enforced again in /api/chat, which is
   // what really stops a turn.
-  const guestTurnsUsed = chat.messages.filter((m) => m.role === "user").length;
+  const guestUsedBefore = useGuestUsage("voice", !user);
+  const guestTurnsUsed =
+    (guestUsedBefore ?? 0) + chat.messages.filter((m) => m.role === "user").length;
   const guestLimitReached = !user && guestTurnsUsed >= GUEST_VOICE_TURNS;
 
   // Opens itself the moment the AI starts talking, same as the chat page's

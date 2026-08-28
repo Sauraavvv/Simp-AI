@@ -7,6 +7,7 @@
  */
 
 import { agentAuth, userHeader } from "@/lib/agent";
+import { chargeGuestTurn } from "@/lib/guest";
 import { GUEST_CHAT_PROMPTS, GUEST_VOICE_TURNS, isDeveloper } from "@/lib/limits";
 import { sessionEmailOr503 } from "@/lib/route-session";
 
@@ -31,28 +32,26 @@ export async function POST(req: Request) {
   if (session.response) return session.response;
 
   // Guest limits. A spoken turn and a typed one arrive on this same route and
-  // are told apart by the `voice` flag useChat already sends -- so the two get
+  // are told apart by the `voice` flag useChat already sends, so the two get
   // separate, separately-counted allowances rather than sharing one.
   //
-  // `messages` includes the turn being sent, so `>` rather than `>=` is what
-  // lets a guest actually use their last one.
-  if (!session.email && typeof body === "object" && body !== null && "messages" in body) {
-    const { messages: rawMessages, voice } = body as { messages?: unknown; voice?: unknown };
-    if (Array.isArray(rawMessages)) {
-      const used = rawMessages.filter((m: { role?: string }) => m?.role === "user").length;
-      const spoken = voice === true;
-      const limit = spoken ? GUEST_VOICE_TURNS : GUEST_CHAT_PROMPTS;
-      if (used > limit) {
-        return Response.json(
-          {
-            error: spoken
-              ? `You have used all ${GUEST_VOICE_TURNS} free voice turns. Create a free account or log in to keep talking.`
-              : `You have reached the guest limit of ${GUEST_CHAT_PROMPTS} prompts. Create a free account or log in to receive 50 free credits, save your conversation history, and continue chatting.`,
-            code: spoken ? "GUEST_VOICE_LIMIT_REACHED" : "GUEST_LIMIT_REACHED",
-          },
-          { status: 402 },
-        );
-      }
+  // Counted server-side against a cookie, not from the message history in the
+  // body: that history is whatever the browser chose to send, so a reload sent
+  // an empty one and handed the guest a fresh allowance every time. See
+  // lib/guest.ts.
+  if (!session.email) {
+    const spoken = (body as { voice?: unknown } | null)?.voice === true;
+    const charge = await chargeGuestTurn(spoken ? "voice" : "chat");
+    if (!charge.allowed) {
+      return Response.json(
+        {
+          error: spoken
+            ? `You have used all ${GUEST_VOICE_TURNS} free voice turns. Create a free account or log in to keep talking.`
+            : `You have reached the guest limit of ${GUEST_CHAT_PROMPTS} prompts. Create a free account or log in to receive 50 free credits, save your conversation history, and continue chatting.`,
+          code: spoken ? "GUEST_VOICE_LIMIT_REACHED" : "GUEST_LIMIT_REACHED",
+        },
+        { status: 402 },
+      );
     }
   }
 

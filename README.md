@@ -85,11 +85,22 @@ index, so Mongo expires them and nothing sweeps.
 | Inbuilt RAG | unavailable | 1 document, for the lifetime of the account | same |
 | History saved | no | yes | yes |
 
-The guest numbers live in `src/lib/limits.ts` and are enforced **twice** —
-once in the browser so the limit is visible before someone types into a box
-that will refuse them, and once in `/api/chat`, which is what actually stops a
-turn. Voice and chat share that route and are told apart by the `voice` flag,
-so the two allowances are counted separately.
+The guest numbers live in `src/lib/limits.ts`. Voice and chat share
+`/api/chat` and are told apart by the `voice` flag, so the two allowances are
+counted separately.
+
+**The count is server-side, keyed on an httpOnly cookie** (`src/lib/guest.ts`).
+The first version counted the user messages in the request body and did not
+hold: that body is whatever the browser sends, so reloading the page sent a
+fresh, empty history and the allowance reset. Both the browser check and the
+route check read the same client-supplied number, which made "enforced twice"
+really enforced once, on the honour system. The tally lives in Mongo now, with
+a 30-day TTL, and `/api/guest` is what the pages seed their own count from so
+the banner still appears at the right time after a reload.
+
+It is a nudge to sign up, not a security boundary: a private window or cleared
+site data starts a new guest, and nothing short of requiring an account
+prevents that. Stopping a refresh from resetting the count is the goal.
 
 `DEVELOPER_EMAILS` (comma-separated) lists accounts exempt from all of it.
 Mirrored on both sides: `store.is_developer` in Python, `isDeveloper` in
@@ -111,6 +122,7 @@ unsaved window.
 | `users` | Accounts, plans, credits, the one-RAG flag |
 | `sessions` | Session cookies, TTL-expired by Mongo |
 | `document_chunks` | RAG chunks and their vectors |
+| `guest_usage` | Signed-out allowances, TTL-expired after 30 days |
 | `tool_calls` | The tool-call log |
 
 `kind` is what separates the sidebar's two lists. It is queried with `$ne:
