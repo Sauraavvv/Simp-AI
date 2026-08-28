@@ -65,7 +65,36 @@ Import the same repo; the defaults for a Next.js project are correct and
 | `AGENT_TOKEN` | the same value as on Render |
 | `MONGODB_URI`, `MONGODB_DB` | Atlas -- Next.js reads it directly for auth, sessions and credits |
 | `DEVELOPER_EMAILS` | the same value as on Render. Both halves check it independently -- Next for what `/documents` shows, Render for what it allows |
-| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | optional -- unset just hides the Google button. Add the deployed origin to the OAuth client's authorised origins or the button 400s |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | optional -- unset just hides the Google button. Setting it is not enough on its own; see below |
+
+### Google sign-in: register the deployed origin
+
+Setting `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is only half of it. The button uses
+Google Identity Services (`google.accounts.id.initialize` in
+`src/components/auth/auth-modal.tsx`), which sends the **page's origin** to
+Google, and Google refuses any origin the OAuth client does not list:
+
+```
+Error 400: origin_mismatch
+```
+
+Fix it in Google Cloud Console → APIs & Services → Credentials → the OAuth 2.0
+Client ID → **Authorized JavaScript origins** → add the deployed origin:
+
+```
+https://your-app.vercel.app
+```
+
+Scheme and host only — no trailing slash and no path, or it will not match.
+Keep `http://localhost:3000` alongside it for local work. This is *not* the
+"Authorized redirect URIs" box; this flow never redirects, so that box stays
+empty and changing it fixes nothing.
+
+Google has no wildcard for origins, so Vercel preview deployments — which get a
+fresh `...-git-<branch>-....vercel.app` hostname each time — cannot be
+registered in advance and will show the same error. Sign in on the production
+URL, or add a specific preview hostname when you need one. Changes take a few
+minutes to take effect.
 
 **Document indexing needs a Vercel plan that allows long functions.** Voyage's
 free tier is rate limited per minute, so a document worth more than one minute
